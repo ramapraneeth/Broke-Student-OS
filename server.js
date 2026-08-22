@@ -160,8 +160,22 @@ async function initDB() {
       );
     `);
 
+    // Create OTP Verifications Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS otp_verifications (
+        id TEXT PRIMARY KEY,
+        mobile_number TEXT NOT NULL,
+        otp_code TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        verified BOOLEAN DEFAULT FALSE,
+        attempts INTEGER DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '5 minutes')
+      );
+    `);
+
     client.release();
-    console.log('✅ Neon PostgreSQL Database Tables Initialized with Notifications Support');
+    console.log('✅ Neon PostgreSQL Database Tables Initialized with OTP Verification & Notifications Support');
   } catch (err) {
     console.error('❌ Failed to initialize database tables:', err);
   }
@@ -170,6 +184,124 @@ async function initDB() {
 initDB();
 
 // === AUTH ROUTES ===
+
+// Send Verification Code (OTP)
+app.post('/api/auth/send-otp', async (req, res) => {
+  const { mobileNumber, reason, role } = req.body;
+  if (!mobileNumber) {
+    return res.status(400).json({ error: 'Mobile number is required' });
+  }
+
+  const cleanMobile = mobileNumber.replace(/\D/g, '');
+  if (cleanMobile.length !== 10) {
+    return res.status(400).json({ error: 'Invalid 10-digit mobile number' });
+  }
+
+  try {
+    // If reason is 'login', verify account exists and role matches
+    if (reason === 'login') {
+      const userRes = await pool.query('SELECT * FROM users WHERE mobile_number = $1', [cleanMobile]);
+      if (userRes.rows.length === 0) {
+        return res.status(404).json({ error: 'No account found with this mobile number. Please sign up.' });
+      }
+      const user = userRes.rows[0];
+      const accountRole = user.role || 'student';
+      const requestedRole = role || 'student';
+      if (requestedRole === 'student' && accountRole === 'parent') {
+        return res.status(403).json({ error: 'This account is registered as a Parent / Guardian. Please use the Parent Login portal.' });
+      }
+      if (requestedRole === 'parent' && accountRole === 'student') {
+        return res.status(403).json({ error: 'This account is registered as a Student. Please use the Student Login portal.' });
+      }
+    }
+
+    // If reason is 'signup', check if already registered
+    if (reason === 'signup') {
+      const userRes = await pool.query('SELECT id FROM users WHERE mobile_number = $1', [cleanMobile]);
+      if (userRes.rows.length > 0) {
+        return res.status(400).json({ error: 'An account with this mobile number already exists. Please log in.' });
+      }
+    }
+
+    // If reason is 'link_child', check if child exists and is a student
+    if (reason === 'link_child') {
+      const studentRes = await pool.query('SELECT id, name, role FROM users WHERE mobile_number = $1', [cleanMobile]);
+      if (studentRes.rows.length === 0) {
+        return res.status(404).json({ error: `No student account found with mobile ${cleanMobile}. Ask student to sign up first.` });
+      }
+      if (studentRes.rows[0].role !== 'student') {
+        return res.status(400).json({ error: 'The specified mobile number belongs to a parent account, not a student.' });
+      }
+    }
+
+    // Generate 6-digit numeric OTP code
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpId = `otp_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
+    // Invalidate previous unverified OTPs for same mobile and reason
+    await pool.query('DELETE FROM otp_verifications WHERE mobile_number = $1 AND reason = $2', [cleanMobile, reason || 'general']);
+
+    await pool.query(`
+      INSERT INTO otp_verifications (id, mobile_number, otp_code, reason, expires_at)
+      VALUES ($1, $2, $3, $4, NOW() + INTERVAL '5 minutes')
+    `, [otpId, cleanMobile, otpCode, reason || 'general']);
+
+    console.log(`📲 [SMS Dispatcher] OTP for ${cleanMobile} (${reason}): [ ${otpCode} ]`);
+
+    res.json({
+      success: true,
+      message: `Verification code sent to +91 ${cleanMobile}`,
+      mobileNumber: cleanMobile,
+      otp: otpCode, // Provided for live in-app simulation toast & testing
+      expiresInSeconds: 300,
+    });
+  } catch (err) {
+    console.error('Send OTP error:', err);
+    res.status(500).json({ error: 'Failed to send verification code.' });
+  }
+});
+
+// Verify Verification Code (OTP)
+app.post('/api/auth/verify-otp', async (req, res) => {
+  const { mobileNumber, otp, reason } = req.body;
+  if (!mobileNumber || !otp) {
+    return res.status(400).json({ error: 'Mobile number and verification code are required' });
+  }
+
+  const cleanMobile = mobileNumber.replace(/\D/g, '');
+  const cleanOtp = otp.toString().trim();
+
+  try {
+    const result = await pool.query(`
+      SELECT * FROM otp_verifications
+      WHERE mobile_number = $1 AND reason = $2 AND verified = FALSE AND expires_at > NOW()
+      ORDER BY created_at DESC
+      LIMIT 1
+    `, [cleanMobile, reason || 'general']);
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({ error: 'Verification code has expired or was not requested. Please request a new code.' });
+    }
+
+    const record = result.rows[0];
+    if (record.otp_code !== cleanOtp) {
+      await pool.query('UPDATE otp_verifications SET attempts = attempts + 1 WHERE id = $1', [record.id]);
+      return res.status(400).json({ error: 'Invalid verification code. Please check and try again.' });
+    }
+
+    // Mark verified
+    await pool.query('UPDATE otp_verifications SET verified = TRUE WHERE id = $1', [record.id]);
+
+    res.json({
+      success: true,
+      message: 'Mobile number verified successfully',
+      mobileNumber: cleanMobile,
+    });
+  } catch (err) {
+    console.error('Verify OTP error:', err);
+    res.status(500).json({ error: 'Failed to verify OTP code' });
+  }
+});
 
 // Login
 app.post('/api/auth/login', async (req, res) => {
@@ -284,21 +416,46 @@ app.post('/api/auth/forgot-password', async (req, res) => {
 
 // === PARENT & ADMIN MONITORING ROUTES ===
 
-// Link a student child to parent
+// Link a student child to parent (with OTP verification)
 app.post('/api/parent/link-child', async (req, res) => {
-  const { parentId, childMobile } = req.body;
+  const { parentId, childMobile, otp } = req.body;
   if (!parentId || !childMobile) {
     return res.status(400).json({ error: 'Parent ID and Student mobile number are required.' });
   }
 
   try {
     // Check if student exists
-    const studentRes = await pool.query('SELECT id, name, mobile_number, is_setup_complete FROM users WHERE mobile_number = $1', [childMobile]);
+    const studentRes = await pool.query('SELECT id, name, mobile_number, role, is_setup_complete FROM users WHERE mobile_number = $1', [childMobile]);
     if (studentRes.rows.length === 0) {
       return res.status(404).json({ error: `No student account found with mobile ${childMobile}. Ask student to sign up first.` });
     }
 
     const student = studentRes.rows[0];
+    if (student.role !== 'student') {
+      return res.status(400).json({ error: 'The specified mobile number does not belong to a student account.' });
+    }
+
+    // If OTP was provided, verify it
+    if (otp) {
+      const otpRes = await pool.query(`
+        SELECT * FROM otp_verifications
+        WHERE mobile_number = $1 AND reason = 'link_child' AND verified = FALSE AND expires_at > NOW()
+        ORDER BY created_at DESC
+        LIMIT 1
+      `, [childMobile]);
+
+      if (otpRes.rows.length === 0) {
+        return res.status(400).json({ error: 'Verification code for child has expired. Please request a new code.' });
+      }
+
+      if (otpRes.rows[0].otp_code !== otp.toString().trim()) {
+        return res.status(400).json({ error: 'Incorrect child verification code. Please ask child for the code.' });
+      }
+
+      // Mark OTP verified
+      await pool.query('UPDATE otp_verifications SET verified = TRUE WHERE id = $1', [otpRes.rows[0].id]);
+    }
+
     const linkId = `link_${parentId}_${student.id}`;
 
     await pool.query(

@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { useFinance } from '../../context/FinanceContext';
 import { useNavigate, Link } from 'react-router-dom';
 import { ArrowRight, Lock, Phone, HelpCircle, GraduationCap, ShieldCheck } from 'lucide-react';
+import { OTPVerificationModal } from '../common/OTPVerificationModal';
 
 export const LoginScreen: React.FC = () => {
-  const { login } = useFinance();
+  const { login, sendOtp } = useFinance();
   const navigate = useNavigate();
 
   const [role, setRole] = useState<'student' | 'parent'>('student');
@@ -14,6 +15,10 @@ export const LoginScreen: React.FC = () => {
   const [errorPassword, setErrorPassword] = useState('');
   const [generalError, setGeneralError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // OTP Verification State
+  const [showOtpModal, setShowOtpModal] = useState(false);
+  const [activeOtp, setActiveOtp] = useState('');
 
   const validateAndSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,8 +47,24 @@ export const LoginScreen: React.FC = () => {
     if (!isValid) return;
 
     setIsSubmitting(true);
+    // Send OTP to user's mobile number
+    const otpRes = await sendOtp(cleanMobile, 'login', role);
+    setIsSubmitting(false);
+
+    if (otpRes.success) {
+      setActiveOtp(otpRes.otp || '');
+      setShowOtpModal(true);
+    } else {
+      setGeneralError(otpRes.error || 'Failed to initiate login verification.');
+    }
+  };
+
+  const handleOtpVerified = async () => {
+    const cleanMobile = mobileNumber.replace(/\D/g, '');
+    setIsSubmitting(true);
     const result = await login(cleanMobile, password, role);
     setIsSubmitting(false);
+    setShowOtpModal(false);
 
     if (result.success) {
       if (result.role === 'parent' || role === 'parent') {
@@ -329,6 +350,16 @@ export const LoginScreen: React.FC = () => {
           </Link>
         </div>
       </div>
+
+      {/* OTP Verification Modal */}
+      <OTPVerificationModal
+        isOpen={showOtpModal}
+        mobileNumber={mobileNumber}
+        reason="login"
+        initialOtp={activeOtp}
+        onVerified={handleOtpVerified}
+        onClose={() => setShowOtpModal(false)}
+      />
     </div>
   );
 };

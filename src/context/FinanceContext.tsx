@@ -57,6 +57,8 @@ interface FinanceContextType {
   login: (mobile: string, pass: string, role?: 'student' | 'parent') => Promise<{ success: boolean; role?: 'student' | 'parent'; error?: string }>;
   signup: (name: string, mobile: string, pass: string, role?: 'student' | 'parent') => Promise<{ success: boolean; error?: string }>;
   resetPassword: (mobile: string, newPass: string) => Promise<{ success: boolean; error?: string }>;
+  sendOtp: (mobile: string, reason: 'login' | 'signup' | 'link_child', role?: 'student' | 'parent') => Promise<{ success: boolean; otp?: string; message?: string; error?: string }>;
+  verifyOtp: (mobile: string, otp: string, reason: 'login' | 'signup' | 'link_child') => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   updateBudget: (name: string, amount: number) => Promise<void>;
   addExpense: (expense: Omit<Expense, 'id' | 'createdAt'>) => Promise<void>;
@@ -70,7 +72,7 @@ interface FinanceContextType {
   
   // Parent actions
   fetchLinkedChildren: () => Promise<void>;
-  linkChild: (childMobile: string) => Promise<{ success: boolean; student?: LinkedChild; error?: string }>;
+  linkChild: (childMobile: string, otp?: string) => Promise<{ success: boolean; student?: LinkedChild; error?: string }>;
   unlinkChild: (childMobile: string) => Promise<void>;
 }
 
@@ -344,14 +346,48 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     localStorage.removeItem(STORAGE_AUTH_KEY);
   };
 
-  // Parent: Link a new student child
-  const linkChild = async (childMobile: string): Promise<{ success: boolean; student?: LinkedChild; error?: string }> => {
+  const sendOtp = async (mobile: string, reason: 'login' | 'signup' | 'link_child', role?: 'student' | 'parent'): Promise<{ success: boolean; otp?: string; message?: string; error?: string }> => {
+    try {
+      const res = await fetch('/api/auth/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobileNumber: mobile, reason, role }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data.error || 'Failed to send verification code' };
+      }
+      return { success: true, otp: data.otp, message: data.message };
+    } catch (err) {
+      return { success: false, error: 'Network error sending verification code' };
+    }
+  };
+
+  const verifyOtp = async (mobile: string, otp: string, reason: 'login' | 'signup' | 'link_child'): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const res = await fetch('/api/auth/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobileNumber: mobile, otp, reason }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data.error || 'Invalid verification code' };
+      }
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: 'Network error verifying code' };
+    }
+  };
+
+  // Parent: Link a new student child (with OTP support)
+  const linkChild = async (childMobile: string, otp?: string): Promise<{ success: boolean; student?: LinkedChild; error?: string }> => {
     if (!user?.id) return { success: false, error: 'Not logged in' };
     try {
       const res = await fetch('/api/parent/link-child', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parentId: user.id, childMobile }),
+        body: JSON.stringify({ parentId: user.id, childMobile, otp }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -736,6 +772,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         login,
         signup,
         resetPassword,
+        sendOtp,
+        verifyOtp,
         logout,
         updateBudget,
         addExpense,

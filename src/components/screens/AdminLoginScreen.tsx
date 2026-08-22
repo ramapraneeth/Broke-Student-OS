@@ -14,9 +14,10 @@ import {
   Sparkles, 
   ShieldAlert 
 } from 'lucide-react';
+import { OTPVerificationModal } from '../common/OTPVerificationModal';
 
 export const AdminLoginScreen: React.FC = () => {
-  const { login } = useFinance();
+  const { login, sendOtp } = useFinance();
   const navigate = useNavigate();
 
   const [mobileNumber, setMobileNumber] = useState('');
@@ -26,6 +27,10 @@ export const AdminLoginScreen: React.FC = () => {
   const [errorPassword, setErrorPassword] = useState('');
   const [generalError, setGeneralError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // OTP Verification State
+  const [showOtpModal, setShowOtpModal] = useState(false);
+  const [activeOtp, setActiveOtp] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,8 +59,23 @@ export const AdminLoginScreen: React.FC = () => {
     if (!isValid) return;
 
     setIsSubmitting(true);
+    const otpRes = await sendOtp(cleanMobile, 'login', 'parent');
+    setIsSubmitting(false);
+
+    if (otpRes.success) {
+      setActiveOtp(otpRes.otp || '');
+      setShowOtpModal(true);
+    } else {
+      setGeneralError(otpRes.error || 'Failed to initiate parent verification.');
+    }
+  };
+
+  const handleOtpVerified = async () => {
+    const cleanMobile = mobileNumber.replace(/\D/g, '');
+    setIsSubmitting(true);
     const result = await login(cleanMobile, password, 'parent');
     setIsSubmitting(false);
+    setShowOtpModal(false);
 
     if (result.success) {
       navigate('/admin');
@@ -356,6 +376,16 @@ export const AdminLoginScreen: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* OTP Verification Modal */}
+      <OTPVerificationModal
+        isOpen={showOtpModal}
+        mobileNumber={mobileNumber}
+        reason="login"
+        initialOtp={activeOtp}
+        onVerified={handleOtpVerified}
+        onClose={() => setShowOtpModal(false)}
+      />
     </div>
   );
 };
