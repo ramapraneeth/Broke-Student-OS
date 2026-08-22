@@ -1,23 +1,27 @@
 import React, { useState } from 'react';
 import { useFinance } from '../../context/FinanceContext';
 import { useNavigate, Link } from 'react-router-dom';
-import { UserPlus, ArrowRight, Lock, Phone, User, ArrowLeft, ShieldCheck, GraduationCap } from 'lucide-react';
+import { UserPlus, ArrowRight, Lock, Mail, User, ArrowLeft, ShieldCheck, GraduationCap } from 'lucide-react';
+import { EmailVerificationModal } from '../common/EmailVerificationModal';
 
 export const SignupScreen: React.FC = () => {
-  const { signup } = useFinance();
+  const { signup, sendEmailOtp, verifyEmailOtp } = useFinance();
   const navigate = useNavigate();
 
   const [role, setRole] = useState<'student' | 'parent'>('student');
   const [name, setName] = useState('');
-  const [mobileNumber, setMobileNumber] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
   const [errorName, setErrorName] = useState('');
-  const [errorMobile, setErrorMobile] = useState('');
+  const [errorEmail, setErrorEmail] = useState('');
   const [errorPassword, setErrorPassword] = useState('');
   const [errorConfirm, setErrorConfirm] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Email Verification Modal state
+  const [showOtpModal, setShowOtpModal] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,15 +36,15 @@ export const SignupScreen: React.FC = () => {
       setErrorName('');
     }
 
-    const cleanMobile = mobileNumber.replace(/\D/g, '');
-    if (!cleanMobile) {
-      setErrorMobile('Please enter your 10-digit mobile number.');
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) {
+      setErrorEmail('Please enter your email address.');
       isValid = false;
-    } else if (cleanMobile.length !== 10) {
-      setErrorMobile('Mobile number must be exactly 10 digits.');
+    } else if (!cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      setErrorEmail('Please enter a valid email address.');
       isValid = false;
     } else {
-      setErrorMobile('');
+      setErrorEmail('');
     }
 
     if (!password || password.length < 4) {
@@ -60,18 +64,42 @@ export const SignupScreen: React.FC = () => {
     if (!isValid) return;
 
     setIsSubmitting(true);
-    const result = await signup(name.trim(), cleanMobile, password, role);
+    // Send 1-minute email verification code
+    const otpRes = await sendEmailOtp(cleanEmail, 'signup', role);
     setIsSubmitting(false);
 
+    if (otpRes.success) {
+      setShowOtpModal(true);
+    } else {
+      setErrorEmail(otpRes.error || 'Failed to send verification code.');
+    }
+  };
+
+  const handleVerifyOtp = async (otpCode: string): Promise<{ success: boolean; error?: string }> => {
+    const cleanEmail = email.trim().toLowerCase();
+    const verifyRes = await verifyEmailOtp(cleanEmail, otpCode, 'signup');
+    if (!verifyRes.success) {
+      return verifyRes;
+    }
+
+    // After verifying email, create the account
+    const result = await signup(name.trim(), cleanEmail, password, role);
     if (result.success) {
+      setShowOtpModal(false);
       if (role === 'parent') {
         navigate('/admin');
       } else {
         navigate('/setup');
       }
+      return { success: true };
     } else {
-      setErrorMobile(result.error || 'Failed to create account.');
+      return { success: false, error: result.error || 'Failed to complete registration.' };
     }
+  };
+
+  const handleResendOtp = async () => {
+    const cleanEmail = email.trim().toLowerCase();
+    return await sendEmailOtp(cleanEmail, 'signup', role);
   };
 
   return (
@@ -98,94 +126,107 @@ export const SignupScreen: React.FC = () => {
 
         {/* Title Header */}
         <div style={{ marginBottom: '18px' }}>
-          <div
-            style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '14px',
-              background: '#EEF2FF',
-              color: '#4F46E5',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: '10px',
-            }}
-          >
-            <UserPlus size={22} />
-          </div>
-          <h1 style={{ fontSize: '1.7rem', fontWeight: 800, color: '#0F172A', letterSpacing: '-0.02em' }}>
-            Create Account
+          <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: '#0F172A', letterSpacing: '-0.03em' }}>
+            Create an Account
           </h1>
-          <p style={{ fontSize: '0.85rem', color: '#64748B', marginTop: '2px' }}>
-            {role === 'student' ? 'Manage your allowance and split bills' : 'Monitor student child expenses and savings'}
+          <p style={{ fontSize: '0.88rem', color: '#64748B', marginTop: '4px' }}>
+            Join Broke OS to manage student expenses or monitor family finances
           </p>
         </div>
 
-        {/* Role Selection Tabs */}
+        {/* Account Role Selector */}
         <div
           style={{
             display: 'grid',
             gridTemplateColumns: '1fr 1fr',
             gap: '8px',
-            background: '#F1F5F9',
+            backgroundColor: '#F1F5F9',
             padding: '4px',
-            borderRadius: '12px',
-            marginBottom: '18px',
+            borderRadius: '14px',
+            marginBottom: '20px',
           }}
         >
           <button
             type="button"
             onClick={() => setRole('student')}
             style={{
-              padding: '9px 8px',
-              borderRadius: '9px',
+              padding: '10px 12px',
+              borderRadius: '10px',
               border: 'none',
-              background: role === 'student' ? '#FFFFFF' : 'transparent',
+              backgroundColor: role === 'student' ? '#FFFFFF' : 'transparent',
               color: role === 'student' ? '#4F46E5' : '#64748B',
               fontWeight: 700,
-              fontSize: '0.82rem',
+              fontSize: '0.85rem',
+              cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               gap: '6px',
-              cursor: 'pointer',
-              boxShadow: role === 'student' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              boxShadow: role === 'student' ? '0 2px 6px rgba(0,0,0,0.06)' : 'none',
+              transition: 'all 0.15s ease',
             }}
           >
-            <GraduationCap size={15} />
-            <span>Student Account</span>
+            <GraduationCap size={16} />
+            <span>Student</span>
           </button>
 
           <button
             type="button"
             onClick={() => setRole('parent')}
             style={{
-              padding: '9px 8px',
-              borderRadius: '9px',
+              padding: '10px 12px',
+              borderRadius: '10px',
               border: 'none',
-              background: role === 'parent' ? '#FFFFFF' : 'transparent',
-              color: role === 'parent' ? '#4F46E5' : '#64748B',
+              backgroundColor: role === 'parent' ? '#FFFFFF' : 'transparent',
+              color: role === 'parent' ? '#2563EB' : '#64748B',
               fontWeight: 700,
-              fontSize: '0.82rem',
+              fontSize: '0.85rem',
+              cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               gap: '6px',
-              cursor: 'pointer',
-              boxShadow: role === 'parent' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              boxShadow: role === 'parent' ? '0 2px 6px rgba(0,0,0,0.06)' : 'none',
+              transition: 'all 0.15s ease',
             }}
           >
-            <ShieldCheck size={15} />
+            <ShieldCheck size={16} />
             <span>Parent / Admin</span>
           </button>
         </div>
 
-        {/* Signup Form */}
+        {/* Role Helper Banner */}
+        <div
+          style={{
+            padding: '10px 14px',
+            borderRadius: '12px',
+            backgroundColor: role === 'student' ? '#EEF2FF' : '#EFF6FF',
+            border: `1px solid ${role === 'student' ? '#C7D2FE' : '#BFDBFE'}`,
+            marginBottom: '20px',
+            fontSize: '0.82rem',
+            color: role === 'student' ? '#3730A3' : '#1E40AF',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          }}
+        >
+          {role === 'student' ? (
+            <>
+              <GraduationCap size={16} style={{ flexShrink: 0 }} />
+              <span>Full hostel split, predictive budget & AI expense manager</span>
+            </>
+          ) : (
+            <>
+              <ShieldCheck size={16} style={{ flexShrink: 0 }} />
+              <span>Parent safety dashboard: link children & monitor spending</span>
+            </>
+          )}
+        </div>
+
+        {/* Registration Form */}
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label className="form-label" htmlFor="signup-name">
-              {role === 'student' ? 'Student Full Name' : 'Parent / Admin Name'}
-            </label>
+            <label className="form-label" htmlFor="signup-name">Full Name</label>
             <div style={{ position: 'relative' }}>
               <span
                 style={{
@@ -204,7 +245,7 @@ export const SignupScreen: React.FC = () => {
                 type="text"
                 className={`input-field ${errorName ? 'input-error' : ''}`}
                 style={{ paddingLeft: '42px' }}
-                placeholder={role === 'student' ? 'e.g. Chiya or Rahul' : 'e.g. Ramesh Sharma'}
+                placeholder={role === 'student' ? 'e.g. Chiya' : 'e.g. Rajesh Kumar'}
                 value={name}
                 onChange={e => {
                   setName(e.target.value);
@@ -217,7 +258,7 @@ export const SignupScreen: React.FC = () => {
           </div>
 
           <div className="form-group">
-            <label className="form-label" htmlFor="signup-mobile">Mobile Number</label>
+            <label className="form-label" htmlFor="signup-email">Email Address</label>
             <div style={{ position: 'relative' }}>
               <span
                 style={{
@@ -229,24 +270,23 @@ export const SignupScreen: React.FC = () => {
                   display: 'flex',
                 }}
               >
-                <Phone size={18} />
+                <Mail size={18} />
               </span>
               <input
-                id="signup-mobile"
-                type="tel"
-                className={`input-field ${errorMobile ? 'input-error' : ''}`}
+                id="signup-email"
+                type="email"
+                className={`input-field ${errorEmail ? 'input-error' : ''}`}
                 style={{ paddingLeft: '42px' }}
-                placeholder="10-digit mobile number"
-                value={mobileNumber}
+                placeholder={role === 'student' ? 'student@university.edu' : 'parent@example.com'}
+                value={email}
                 onChange={e => {
-                  setMobileNumber(e.target.value);
-                  if (errorMobile) setErrorMobile('');
+                  setEmail(e.target.value);
+                  if (errorEmail) setErrorEmail('');
                 }}
-                maxLength={10}
                 required
               />
             </div>
-            {errorMobile && <span className="error-text">⚠️ {errorMobile}</span>}
+            {errorEmail && <span className="error-text">⚠️ {errorEmail}</span>}
           </div>
 
           <div className="form-group">
@@ -301,7 +341,7 @@ export const SignupScreen: React.FC = () => {
                 type="password"
                 className={`input-field ${errorConfirm ? 'input-error' : ''}`}
                 style={{ paddingLeft: '42px' }}
-                placeholder="Re-enter password"
+                placeholder="Confirm password"
                 value={confirmPassword}
                 onChange={e => {
                   setConfirmPassword(e.target.value);
@@ -315,51 +355,42 @@ export const SignupScreen: React.FC = () => {
 
           <button
             type="submit"
-            className="btn-primary"
+            className="btn btn-primary"
+            style={{ width: '100%', marginTop: '12px', padding: '14px' }}
             disabled={isSubmitting}
-            style={{ marginTop: '10px', height: '48px' }}
           >
             {isSubmitting ? (
-              <span>Creating Account...</span>
+              <span>Sending Verification Code...</span>
             ) : (
               <>
-                <span>REGISTER AS {role.toUpperCase()}</span>
+                <UserPlus size={18} />
+                <span>Verify Email & Create Account</span>
                 <ArrowRight size={18} />
               </>
             )}
           </button>
         </form>
 
-        <div style={{ textAlign: 'center', marginTop: '22px' }}>
-          <p style={{ fontSize: '0.875rem', color: '#64748B' }}>
+        {/* Footer info */}
+        <div style={{ textAlign: 'center', marginTop: '24px' }}>
+          <p style={{ fontSize: '0.88rem', color: '#64748B' }}>
             Already have an account?{' '}
-            <Link
-              to="/login"
-              style={{ color: '#4F46E5', fontWeight: 700, textDecoration: 'none', marginLeft: '4px' }}
-            >
+            <Link to="/login" style={{ color: '#4F46E5', fontWeight: 700, textDecoration: 'none' }}>
               Sign In
             </Link>
           </p>
         </div>
-
-        <div
-          style={{
-            marginTop: '20px',
-            padding: '12px',
-            background: '#F8FAFC',
-            borderRadius: '12px',
-            border: '1px solid #E2E8F0',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-          }}
-        >
-          <ShieldCheck size={18} color="#10B981" />
-          <span style={{ fontSize: '0.75rem', color: '#64748B' }}>
-            Persisted securely on Neon PostgreSQL cloud database.
-          </span>
-        </div>
       </div>
+
+      {/* 1-Minute Expiring Email OTP Verification Modal */}
+      <EmailVerificationModal
+        isOpen={showOtpModal}
+        email={email.trim().toLowerCase()}
+        reason="signup"
+        onClose={() => setShowOtpModal(false)}
+        onVerify={handleVerifyOtp}
+        onResend={handleResendOtp}
+      />
     </div>
   );
 };

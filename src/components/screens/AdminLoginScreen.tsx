@@ -3,7 +3,7 @@ import { useFinance } from '../../context/FinanceContext';
 import { useNavigate, Link } from 'react-router-dom';
 import { 
   ShieldCheck, 
-  Phone, 
+  Mail, 
   Lock, 
   ArrowRight, 
   GraduationCap, 
@@ -19,10 +19,10 @@ export const AdminLoginScreen: React.FC = () => {
   const { login } = useFinance();
   const navigate = useNavigate();
 
-  const [mobileNumber, setMobileNumber] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [errorMobile, setErrorMobile] = useState('');
+  const [errorEmail, setErrorEmail] = useState('');
   const [errorPassword, setErrorPassword] = useState('');
   const [generalError, setGeneralError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -33,15 +33,15 @@ export const AdminLoginScreen: React.FC = () => {
 
     setGeneralError('');
     let isValid = true;
-    const cleanMobile = mobileNumber.replace(/\D/g, '');
-    if (!cleanMobile) {
-      setErrorMobile('Please enter your registered mobile number.');
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) {
+      setErrorEmail('Please enter your registered email address.');
       isValid = false;
-    } else if (cleanMobile.length !== 10) {
-      setErrorMobile('Mobile number must be exactly 10 digits.');
+    } else if (!cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      setErrorEmail('Please enter a valid email address.');
       isValid = false;
     } else {
-      setErrorMobile('');
+      setErrorEmail('');
     }
 
     if (!password || password.trim().length === 0) {
@@ -54,7 +54,7 @@ export const AdminLoginScreen: React.FC = () => {
     if (!isValid) return;
 
     setIsSubmitting(true);
-    const result = await login(cleanMobile, password, 'parent');
+    const result = await login(cleanEmail, password, 'parent');
     setIsSubmitting(false);
 
     if (result.success) {
@@ -187,7 +187,7 @@ export const AdminLoginScreen: React.FC = () => {
 
           <form onSubmit={handleSubmit}>
             <div className="form-group">
-              <label className="form-label" htmlFor="admin-mobile">Parent Mobile Number</label>
+              <label className="form-label" htmlFor="admin-email">Parent Email Address</label>
               <div style={{ position: 'relative' }}>
                 <span
                   style={{
@@ -200,24 +200,23 @@ export const AdminLoginScreen: React.FC = () => {
                     alignItems: 'center',
                   }}
                 >
-                  <Phone size={18} />
+                  <Mail size={18} />
                 </span>
                 <input
-                  id="admin-mobile"
-                  type="tel"
-                  className={`input-field ${errorMobile ? 'input-error' : ''}`}
+                  id="admin-email"
+                  type="email"
+                  className={`input-field ${errorEmail ? 'input-error' : ''}`}
                   style={{ paddingLeft: '42px' }}
-                  placeholder="10-digit mobile number"
-                  value={mobileNumber}
+                  placeholder="parent@example.com"
+                  value={email}
                   onChange={e => {
-                    setMobileNumber(e.target.value);
-                    if (errorMobile) setErrorMobile('');
+                    setEmail(e.target.value);
+                    if (errorEmail) setErrorEmail('');
                   }}
-                  maxLength={10}
                   required
                 />
               </div>
-              {errorMobile && <span className="error-text">⚠️ {errorMobile}</span>}
+              {errorEmail && <span className="error-text">⚠️ {errorEmail}</span>}
             </div>
 
             <div className="form-group">

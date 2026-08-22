@@ -101,6 +101,57 @@ export async function sendBrowserNotification(title: string, message: string, ta
   }
 }
 
+/**
+ * Dispatch 6-digit verification code directly as a system push notification
+ */
+export async function sendSystemPushOtp(otpCode: string, email?: string): Promise<{ success: boolean; error?: string }> {
+  if (!isBrowserNotificationSupported()) {
+    return { success: false, error: 'System notifications not supported in this browser.' };
+  }
+
+  let permission = Notification.permission;
+  if (permission === 'default') {
+    try {
+      permission = await Notification.requestPermission();
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  if (permission !== 'granted') {
+    return { success: false, error: 'Please allow notification permissions in your browser to receive your security code.' };
+  }
+
+  const title = '🔐 Broke OS Security Code';
+  const body = `Your 6-digit verification code is: ${otpCode}\nValid for 1 minute (60s). Enter this code to proceed.`;
+
+  try {
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.ready;
+      if (reg && reg.showNotification) {
+        await reg.showNotification(title, {
+          body,
+          icon: '/pwa-192x192.svg',
+          badge: '/favicon.svg',
+          tag: 'otp_verification',
+          data: { url: '/' },
+        } as NotificationOptions);
+        return { success: true };
+      }
+    }
+
+    new Notification(title, {
+      body,
+      icon: '/pwa-192x192.svg',
+      tag: 'otp_verification',
+    });
+    return { success: true };
+  } catch (err: any) {
+    console.error('System push OTP dispatch failed:', err);
+    return { success: false, error: 'Failed to display system notification.' };
+  }
+}
+
 export interface EvaluateAlertsParams {
   user: UserProfile;
   metrics: FinancialMetrics;

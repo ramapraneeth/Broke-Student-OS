@@ -1,16 +1,16 @@
 import React, { useState } from 'react';
 import { useFinance } from '../../context/FinanceContext';
 import { useNavigate, Link } from 'react-router-dom';
-import { ArrowRight, Lock, Phone, HelpCircle, GraduationCap, ShieldCheck } from 'lucide-react';
+import { ArrowRight, Lock, Mail, HelpCircle, GraduationCap, ShieldCheck } from 'lucide-react';
 
 export const LoginScreen: React.FC = () => {
   const { login } = useFinance();
   const navigate = useNavigate();
 
   const [role, setRole] = useState<'student' | 'parent'>('student');
-  const [mobileNumber, setMobileNumber] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [errorMobile, setErrorMobile] = useState('');
+  const [errorEmail, setErrorEmail] = useState('');
   const [errorPassword, setErrorPassword] = useState('');
   const [generalError, setGeneralError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -21,15 +21,15 @@ export const LoginScreen: React.FC = () => {
 
     setGeneralError('');
     let isValid = true;
-    const cleanMobile = mobileNumber.replace(/\D/g, '');
-    if (!cleanMobile) {
-      setErrorMobile('Please enter your mobile number.');
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) {
+      setErrorEmail('Please enter your email address.');
       isValid = false;
-    } else if (cleanMobile.length !== 10) {
-      setErrorMobile('Mobile number must be exactly 10 digits.');
+    } else if (!cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      setErrorEmail('Please enter a valid email address.');
       isValid = false;
     } else {
-      setErrorMobile('');
+      setErrorEmail('');
     }
 
     if (!password || password.trim().length === 0) {
@@ -42,7 +42,7 @@ export const LoginScreen: React.FC = () => {
     if (!isValid) return;
 
     setIsSubmitting(true);
-    const result = await login(cleanMobile, password, role);
+    const result = await login(cleanEmail, password, role);
     setIsSubmitting(false);
 
     if (result.success) {
@@ -189,8 +189,8 @@ export const LoginScreen: React.FC = () => {
         {/* Login Form */}
         <form onSubmit={validateAndSubmit}>
           <div className="form-group">
-            <label className="form-label" htmlFor="login-mobile">
-              {role === 'student' ? 'Student Mobile Number' : 'Parent Mobile Number'}
+            <label className="form-label" htmlFor="login-email">
+              {role === 'student' ? 'Student Email Address' : 'Parent Email Address'}
             </label>
             <div style={{ position: 'relative' }}>
               <span
@@ -204,24 +204,23 @@ export const LoginScreen: React.FC = () => {
                   alignItems: 'center',
                 }}
               >
-                <Phone size={18} />
+                <Mail size={18} />
               </span>
               <input
-                id="login-mobile"
-                type="tel"
-                className={`input-field ${errorMobile ? 'input-error' : ''}`}
+                id="login-email"
+                type="email"
+                className={`input-field ${errorEmail ? 'input-error' : ''}`}
                 style={{ paddingLeft: '42px' }}
-                placeholder="10-digit mobile number"
-                value={mobileNumber}
+                placeholder={role === 'student' ? 'student@university.edu / email' : 'parent@example.com'}
+                value={email}
                 onChange={e => {
-                  setMobileNumber(e.target.value);
-                  if (errorMobile) setErrorMobile('');
+                  setEmail(e.target.value);
+                  if (errorEmail) setErrorEmail('');
                 }}
-                maxLength={10}
                 required
               />
             </div>
-            {errorMobile && <span className="error-text">⚠️ {errorMobile}</span>}
+            {errorEmail && <span className="error-text">⚠️ {errorEmail}</span>}
           </div>
 
           <div className="form-group">

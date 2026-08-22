@@ -29,7 +29,7 @@ interface FinanceContextType {
   metrics: FinancialMetrics;
   isLoading: boolean;
   
-  // Notification State
+  // Notification States & Controls
   notifications: AppNotification[];
   notificationSettings: NotificationSettings;
   unreadNotificationCount: number;
@@ -43,7 +43,7 @@ interface FinanceContextType {
   dismissBanner: () => void;
   showNotificationBanner: boolean;
   
-  // Parent / Admin state
+  // Parent & Admin Controls
   linkedChildren: LinkedChild[];
   selectedChild: LinkedChild | null;
   childBudget: number;
@@ -54,9 +54,11 @@ interface FinanceContextType {
   
   setMonthYear: (my: string) => void;
   setSelectedChild: (c: LinkedChild | null) => void;
-  login: (mobile: string, pass: string, role?: 'student' | 'parent') => Promise<{ success: boolean; role?: 'student' | 'parent'; error?: string }>;
-  signup: (name: string, mobile: string, pass: string, role?: 'student' | 'parent') => Promise<{ success: boolean; error?: string }>;
-  resetPassword: (mobile: string, newPass: string) => Promise<{ success: boolean; error?: string }>;
+  login: (email: string, pass: string, role?: 'student' | 'parent') => Promise<{ success: boolean; role?: 'student' | 'parent'; error?: string }>;
+  signup: (name: string, email: string, pass: string, role?: 'student' | 'parent') => Promise<{ success: boolean; error?: string }>;
+  resetPassword: (email: string, newPass: string) => Promise<{ success: boolean; error?: string }>;
+  sendEmailOtp: (email: string, reason: 'login' | 'signup' | 'link_child' | 'forgot_password', role?: 'student' | 'parent') => Promise<{ success: boolean; message?: string; error?: string }>;
+  verifyEmailOtp: (email: string, otp: string, reason: 'login' | 'signup' | 'link_child' | 'forgot_password') => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   updateBudget: (name: string, amount: number) => Promise<void>;
   addExpense: (expense: Omit<Expense, 'id' | 'createdAt'>) => Promise<void>;
@@ -70,8 +72,8 @@ interface FinanceContextType {
   
   // Parent actions
   fetchLinkedChildren: () => Promise<void>;
-  linkChild: (childMobile: string) => Promise<{ success: boolean; student?: LinkedChild; error?: string }>;
-  unlinkChild: (childMobile: string) => Promise<void>;
+  linkChild: (childEmail: string) => Promise<{ success: boolean; student?: LinkedChild; error?: string }>;
+  unlinkChild: (childEmail: string) => Promise<void>;
 }
 
 
@@ -280,12 +282,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     selectedChild?.name || 'Child'
   );
 
-  const login = async (mobile: string, pass: string, role?: 'student' | 'parent'): Promise<{ success: boolean; role?: 'student' | 'parent'; error?: string }> => {
+  const login = async (email: string, pass: string, role?: 'student' | 'parent'): Promise<{ success: boolean; role?: 'student' | 'parent'; error?: string }> => {
+    const cleanEmail = email.trim().toLowerCase();
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mobileNumber: mobile, password: pass, role }),
+        body: JSON.stringify({ email: cleanEmail, password: pass, role }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -299,12 +302,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  const signup = async (name: string, mobile: string, pass: string, role: 'student' | 'parent' = 'student'): Promise<{ success: boolean; error?: string }> => {
+  const signup = async (name: string, email: string, pass: string, role: 'student' | 'parent' = 'student'): Promise<{ success: boolean; error?: string }> => {
+    const cleanEmail = email.trim().toLowerCase();
     try {
       const res = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, mobileNumber: mobile, password: pass, role }),
+        body: JSON.stringify({ name: name.trim(), email: cleanEmail, password: pass, role }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -317,12 +321,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  const resetPassword = async (mobile: string, newPass: string): Promise<{ success: boolean; error?: string }> => {
+  const resetPassword = async (email: string, newPass: string): Promise<{ success: boolean; error?: string }> => {
+    const cleanEmail = email.trim().toLowerCase();
     try {
       const res = await fetch('/api/auth/forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mobileNumber: mobile, newPassword: newPass }),
+        body: JSON.stringify({ email: cleanEmail, newPassword: newPass }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -331,6 +336,43 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return { success: true };
     } catch (err) {
       return { success: false, error: 'Network error' };
+    }
+  };
+
+  const sendEmailOtp = async (email: string, reason: 'login' | 'signup' | 'link_child' | 'forgot_password', role?: 'student' | 'parent'): Promise<{ success: boolean; message?: string; error?: string }> => {
+    const cleanEmail = email.trim().toLowerCase();
+    try {
+      const res = await fetch('/api/auth/send-email-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, reason, role }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data.error || 'Failed to dispatch security code' };
+      }
+      return { success: true, message: data.message };
+    } catch (err) {
+      return { success: false, error: 'Network error sending verification code' };
+    }
+  };
+
+  const verifyEmailOtp = async (email: string, otp: string, reason: 'login' | 'signup' | 'link_child' | 'forgot_password'): Promise<{ success: boolean; error?: string }> => {
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanOtp = otp.toString().trim();
+    try {
+      const res = await fetch('/api/auth/verify-email-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, otp: cleanOtp, reason }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data.error || 'Invalid or expired verification code' };
+      }
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: 'Network error verifying code' };
     }
   };
 
@@ -344,14 +386,15 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     localStorage.removeItem(STORAGE_AUTH_KEY);
   };
 
-  // Parent: Link a new student child
-  const linkChild = async (childMobile: string): Promise<{ success: boolean; student?: LinkedChild; error?: string }> => {
+  // Parent: Link a new student child by Email
+  const linkChild = async (childEmail: string): Promise<{ success: boolean; student?: LinkedChild; error?: string }> => {
     if (!user?.id) return { success: false, error: 'Not logged in' };
+    const cleanEmail = childEmail.trim().toLowerCase();
     try {
       const res = await fetch('/api/parent/link-child', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parentId: user.id, childMobile }),
+        body: JSON.stringify({ parentId: user.id, childEmail: cleanEmail }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -365,16 +408,17 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   // Parent: Unlink child
-  const unlinkChild = async (childMobile: string) => {
+  const unlinkChild = async (childEmail: string) => {
     if (!user?.id) return;
+    const cleanEmail = childEmail.trim().toLowerCase();
     try {
       await fetch('/api/parent/unlink-child', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parentId: user.id, childMobile }),
+        body: JSON.stringify({ parentId: user.id, childEmail: cleanEmail }),
       });
-      setLinkedChildren(prev => prev.filter(c => c.mobileNumber !== childMobile));
-      if (selectedChild?.mobileNumber === childMobile) {
+      setLinkedChildren(prev => prev.filter(c => c.email.toLowerCase() !== cleanEmail));
+      if (selectedChild?.email.toLowerCase() === cleanEmail) {
         setSelectedChild(null);
       }
     } catch (err) {
@@ -736,6 +780,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         login,
         signup,
         resetPassword,
+        sendEmailOtp,
+        verifyEmailOtp,
         logout,
         updateBudget,
         addExpense,

@@ -1,6 +1,8 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import pg from 'pg';
+import nodemailer from 'nodemailer';
 
 const { Pool } = pg;
 const app = express();
@@ -18,7 +20,222 @@ const pool = new Pool({
 app.use(cors());
 app.use(express.json());
 
-// Initialize Database Schema
+// === NODEMAILER EMAIL TRANSPORTER ===
+const GMAIL_USER = process.env.GMAIL_USER || 'infodesk.college@gmail.com';
+const GMAIL_APP_PASSWORD = (process.env.GMAIL_APP_PASSWORD || 'dtlz boee luyv kgpk').replace(/\s+/g, '');
+
+const mailTransporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: GMAIL_USER,
+    pass: GMAIL_APP_PASSWORD,
+  },
+});
+
+/**
+ * Dispatch Branded HTML Email for 1-Minute Expiring OTP Verification
+ */
+async function sendOtpEmail(toEmail, otpCode, reason) {
+  const reasonTitles = {
+    login: 'Login Security Verification',
+    signup: 'Confirm Your Registration',
+    link_child: 'Student Account Linking Consent',
+    forgot_password: 'Password Reset Verification',
+  };
+
+  const title = reasonTitles[reason] || 'Security Verification Code';
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F8FAFC; margin: 0; padding: 20px; }
+          .card { max-width: 500px; margin: 0 auto; background: #FFFFFF; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.08); border: 1px solid #E2E8F0; }
+          .header { background: linear-gradient(135deg, #4F46E5 0%, #3730A3 100%); padding: 30px 24px; text-align: center; color: #FFFFFF; }
+          .header h1 { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.5px; }
+          .header p { margin: 6px 0 0 0; font-size: 13px; color: #E0E7FF; }
+          .body { padding: 32px 24px; text-align: center; }
+          .otp-box { background: #EEF2FF; border: 2px dashed #4F46E5; border-radius: 14px; padding: 18px 24px; font-size: 32px; font-weight: 800; letter-spacing: 8px; color: #3730A3; margin: 24px 0; display: inline-block; }
+          .expiry-badge { display: inline-flex; align-items: center; gap: 6px; background: #FEF2F2; color: #DC2626; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; border: 1px solid #FECACA; }
+          .footer { padding: 20px 24px; background: #F8FAFC; border-top: 1px solid #E2E8F0; text-align: center; font-size: 12px; color: #94A3B8; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <div class="header">
+            <h1>🛡️ Broke OS</h1>
+            <p>${title}</p>
+          </div>
+          <div class="body">
+            <p style="color: #475569; font-size: 15px; margin: 0 0 12px 0;">Use the 6-digit verification code below to verify your email address:</p>
+            <div class="otp-box">${otpCode}</div>
+            <br>
+            <div class="expiry-badge">⏳ Strictly valid for 1 minute (60 seconds)</div>
+            <p style="color: #64748B; font-size: 13px; margin: 24px 0 0 0;">If you did not request this verification code, please ignore this email.</p>
+          </div>
+          <div class="footer">
+            Broke OS — Intelligent Personal Finance Manager for Students
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  try {
+    const info = await mailTransporter.sendMail({
+      from: `"Broke OS Security" <${GMAIL_USER}>`,
+      to: toEmail,
+      subject: `🔐 [${otpCode}] Your Broke OS Verification Code (Expires in 1 min)`,
+      html,
+    });
+    console.log(`📧 [Gmail SMTP] OTP email dispatched to ${toEmail} (MessageId: ${info.messageId})`);
+    return { success: true, messageId: info.messageId };
+  } catch (err) {
+    console.warn(`⚠️ [Gmail SMTP] Email send error for ${toEmail}:`, err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Dispatch Branded Expense Alert Email (Monthly Budget Exceeded or Single Limit Exceeded)
+ */
+async function sendExpenseAlertEmail({
+  studentEmail,
+  parentEmails,
+  expenseData,
+  monthlyBudget,
+  totalSpent,
+  remainingBudget,
+  alertType, // 'monthly_limit_exceeded' | 'single_limit_exceeded' | 'near_limit'
+  studentName = 'Student'
+}) {
+  const { title, amount, category, date } = expenseData;
+
+  const isMonthlyExceeded = alertType === 'monthly_limit_exceeded';
+  const isNearLimit = alertType === 'near_limit';
+  const overspentAmount = Math.max(0, totalSpent - monthlyBudget);
+
+  const headerBg = isMonthlyExceeded
+    ? 'linear-gradient(135deg, #DC2626 0%, #991B1B 100%)'
+    : isNearLimit
+    ? 'linear-gradient(135deg, #EA580C 0%, #C2410C 100%)'
+    : 'linear-gradient(135deg, #4F46E5 0%, #3730A3 100%)';
+
+  const badgeTitle = isMonthlyExceeded
+    ? '🚨 URGENT: Monthly Budget Limit Exceeded!'
+    : isNearLimit
+    ? '⚠️ Warning: 85%+ of Monthly Budget Reached'
+    : '💳 High-Value Expense Alert';
+
+  const subtitle = isMonthlyExceeded
+    ? `Monthly limit of ₹${Math.round(monthlyBudget)} has been exceeded by ₹${Math.round(overspentAmount)}`
+    : isNearLimit
+    ? `Current monthly spending is ₹${Math.round(totalSpent)} out of ₹${Math.round(monthlyBudget)} budget`
+    : `An expense of ₹${amount} was recorded`;
+
+  const emailSubject = isMonthlyExceeded
+    ? `🚨 URGENT: Monthly Budget Exceeded by ₹${Math.round(overspentAmount)} (${studentName})`
+    : isNearLimit
+    ? `⚠️ Broke OS Warning: ${studentName} is near their monthly budget limit`
+    : `💳 Broke OS Alert: ₹${amount} recorded for "${title}" (${studentName})`;
+
+  const statusCard = isMonthlyExceeded ? `
+    <div style="background: #FEF2F2; border: 1.5px solid #FECACA; border-radius: 14px; padding: 16px; text-align: center; margin-top: 20px;">
+      <div style="font-size: 13px; color: #991B1B; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Budget Status: Exceeded</div>
+      <div style="font-size: 24px; font-weight: 800; color: #DC2626; margin: 4px 0;">Over budget by ₹${Math.round(overspentAmount)}</div>
+      <div style="font-size: 13px; color: #7F1D1D;">Total Spent: ₹${Math.round(totalSpent)} / Monthly Budget: ₹${Math.round(monthlyBudget)}</div>
+    </div>
+  ` : `
+    <div style="background: #F0FDF4; border: 1.5px solid #BBF7D0; border-radius: 14px; padding: 16px; text-align: center; margin-top: 20px;">
+      <div style="font-size: 13px; color: #166534; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Remaining Monthly Budget</div>
+      <div style="font-size: 24px; font-weight: 800; color: #16A34A; margin: 4px 0;">₹${Math.round(remainingBudget)}</div>
+      <div style="font-size: 13px; color: #15803D;">Spent so far: ₹${Math.round(totalSpent)} of ₹${Math.round(monthlyBudget)}</div>
+    </div>
+  `;
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #F8FAFC; margin: 0; padding: 20px; }
+          .card { max-width: 520px; margin: 0 auto; background: #FFFFFF; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.08); border: 1px solid #E2E8F0; }
+          .header { background: ${headerBg}; padding: 28px 24px; text-align: center; color: #FFFFFF; }
+          .body { padding: 28px 24px; }
+          .amount-tag { font-size: 32px; font-weight: 800; color: #0F172A; margin: 8px 0; }
+          .details-table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+          .details-table td { padding: 10px 0; border-bottom: 1px solid #F1F5F9; font-size: 14px; }
+          .details-table td:first-child { color: #64748B; font-weight: 600; width: 45%; }
+          .details-table td:last-child { color: #0F172A; font-weight: 700; text-align: right; }
+          .footer { padding: 18px 24px; background: #F8FAFC; border-top: 1px solid #E2E8F0; text-align: center; font-size: 12px; color: #94A3B8; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <div class="header">
+            <h1 style="margin:0; font-size: 20px; font-weight: 800;">${badgeTitle}</h1>
+            <p style="margin: 6px 0 0 0; font-size: 13px; color: #FEE2E2;">${subtitle}</p>
+          </div>
+          <div class="body">
+            <div style="text-align: center; margin-bottom: 14px;">
+              <div style="font-size: 13px; color: #64748B; font-weight: 600;">Latest Expense Recorded</div>
+              <div class="amount-tag">₹${amount}</div>
+              <div style="font-size: 15px; color: #475569; font-weight: 700;">"${title}"</div>
+            </div>
+
+            <table class="details-table">
+              <tr>
+                <td>Student</td>
+                <td>${studentName} (${studentEmail})</td>
+              </tr>
+              <tr>
+                <td>Expense Category</td>
+                <td>${category}</td>
+              </tr>
+              <tr>
+                <td>Transaction Date</td>
+                <td>${date}</td>
+              </tr>
+              <tr>
+                <td>Monthly Budget Limit</td>
+                <td>₹${Math.round(monthlyBudget)}</td>
+              </tr>
+              <tr>
+                <td>Total Spent This Month</td>
+                <td>₹${Math.round(totalSpent)}</td>
+              </tr>
+            </table>
+
+            ${statusCard}
+          </div>
+          <div class="footer">
+            Broke OS — Family Finance & Safety System • Sent from infodesk.college@gmail.com
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  const recipients = [studentEmail, ...parentEmails].filter(Boolean);
+  if (recipients.length === 0) return;
+
+  try {
+    const info = await mailTransporter.sendMail({
+      from: `"Broke OS Family Alerts" <${GMAIL_USER}>`,
+      to: recipients.join(','),
+      subject: emailSubject,
+      html,
+    });
+    console.log(`📧 [Gmail SMTP] Alert email (${alertType}) successfully delivered to: ${recipients.join(', ')} (MessageId: ${info.messageId})`);
+  } catch (err) {
+    console.warn('⚠️ [Gmail SMTP] Alert email delivery error:', err.message);
+  }
+}
+
+// === DATABASE SCHEMA INITIALIZATION ===
 async function initDB() {
   try {
     const client = await pool.connect();
@@ -28,7 +245,8 @@ async function initDB() {
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
-        mobile_number TEXT UNIQUE NOT NULL,
+        email TEXT UNIQUE,
+        mobile_number TEXT,
         password TEXT NOT NULL,
         role TEXT DEFAULT 'student',
         is_setup_complete BOOLEAN DEFAULT FALSE,
@@ -36,8 +254,9 @@ async function initDB() {
       );
     `);
 
-    // Ensure role column exists if table was previously created
+    // Ensure email and role columns exist
     await client.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT UNIQUE;
       ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'student';
     `);
 
@@ -46,10 +265,15 @@ async function initDB() {
       CREATE TABLE IF NOT EXISTS parent_child_links (
         id TEXT PRIMARY KEY,
         parent_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        child_mobile TEXT NOT NULL,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        UNIQUE(parent_id, child_mobile)
+        child_email TEXT,
+        child_mobile TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
       );
+    `);
+
+    // Ensure child_email column exists
+    await client.query(`
+      ALTER TABLE parent_child_links ADD COLUMN IF NOT EXISTS child_email TEXT;
     `);
 
     // Create Budgets Table
@@ -138,7 +362,7 @@ async function initDB() {
         browser_notifications BOOLEAN DEFAULT TRUE,
         budget_alerts BOOLEAN DEFAULT TRUE,
         custom_threshold_enabled BOOLEAN DEFAULT FALSE,
-        custom_threshold_amount NUMERIC DEFAULT 700,
+        custom_threshold_amount NUMERIC DEFAULT 500,
         spending_alerts BOOLEAN DEFAULT TRUE,
         prediction_alerts BOOLEAN DEFAULT TRUE,
         split_bill_alerts BOOLEAN DEFAULT TRUE,
@@ -149,33 +373,22 @@ async function initDB() {
       );
     `);
 
-    // Create Push Subscriptions Table
+    // Create Email Verifications Table (Strict 1-Minute Expiration)
     await client.query(`
-      CREATE TABLE IF NOT EXISTS push_subscriptions (
+      CREATE TABLE IF NOT EXISTS email_verifications (
         id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        subscription JSONB NOT NULL,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        UNIQUE(user_id)
-      );
-    `);
-
-    // Create OTP Verifications Table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS otp_verifications (
-        id TEXT PRIMARY KEY,
-        mobile_number TEXT NOT NULL,
+        email TEXT NOT NULL,
         otp_code TEXT NOT NULL,
-        reason TEXT NOT NULL,
+        reason TEXT DEFAULT 'general',
+        expires_at TIMESTAMPTZ NOT NULL,
         verified BOOLEAN DEFAULT FALSE,
         attempts INTEGER DEFAULT 0,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '5 minutes')
+        created_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
 
     client.release();
-    console.log('✅ Neon PostgreSQL Database Tables Initialized with OTP Verification & Notifications Support');
+    console.log('✅ Neon PostgreSQL Database Initialized with Email Authentication & 1-Minute Expiry Support');
   } catch (err) {
     console.error('❌ Failed to initialize database tables:', err);
   }
@@ -183,26 +396,23 @@ async function initDB() {
 
 initDB();
 
-// === AUTH ROUTES ===
+// === AUTHENTICATION & EMAIL OTP ROUTES ===
 
-// Send Verification Code (OTP)
-app.post('/api/auth/send-otp', async (req, res) => {
-  const { mobileNumber, reason, role } = req.body;
-  if (!mobileNumber) {
-    return res.status(400).json({ error: 'Mobile number is required' });
+// Send Email Verification Code (1-Minute Expiration)
+app.post('/api/auth/send-email-otp', async (req, res) => {
+  const { email, reason, role } = req.body;
+  if (!email || !email.includes('@')) {
+    return res.status(400).json({ error: 'Valid email address is required.' });
   }
 
-  const cleanMobile = mobileNumber.replace(/\D/g, '');
-  if (cleanMobile.length !== 10) {
-    return res.status(400).json({ error: 'Invalid 10-digit mobile number' });
-  }
+  const cleanEmail = email.trim().toLowerCase();
 
   try {
-    // If reason is 'login', verify account exists and role matches
+    // 1. Role validation for login
     if (reason === 'login') {
-      const userRes = await pool.query('SELECT * FROM users WHERE mobile_number = $1', [cleanMobile]);
+      const userRes = await pool.query('SELECT * FROM users WHERE LOWER(email) = $1', [cleanEmail]);
       if (userRes.rows.length === 0) {
-        return res.status(404).json({ error: 'No account found with this mobile number. Please sign up.' });
+        return res.status(404).json({ error: 'No account found with this email address. Please sign up.' });
       }
       const user = userRes.rows[0];
       const accountRole = user.role || 'student';
@@ -215,118 +425,111 @@ app.post('/api/auth/send-otp', async (req, res) => {
       }
     }
 
-    // If reason is 'signup', check if already registered
+    // 2. Existing check for signup
     if (reason === 'signup') {
-      const userRes = await pool.query('SELECT id FROM users WHERE mobile_number = $1', [cleanMobile]);
+      const userRes = await pool.query('SELECT id FROM users WHERE LOWER(email) = $1', [cleanEmail]);
       if (userRes.rows.length > 0) {
-        return res.status(400).json({ error: 'An account with this mobile number already exists. Please log in.' });
+        return res.status(400).json({ error: 'An account with this email address already exists. Please log in.' });
       }
     }
 
-    // If reason is 'link_child', check if child exists and is a student
+    // 3. Check for child linking
     if (reason === 'link_child') {
-      const studentRes = await pool.query('SELECT id, name, role FROM users WHERE mobile_number = $1', [cleanMobile]);
+      const studentRes = await pool.query('SELECT id, name, role FROM users WHERE LOWER(email) = $1', [cleanEmail]);
       if (studentRes.rows.length === 0) {
-        return res.status(404).json({ error: `No student account found with mobile ${cleanMobile}. Ask student to sign up first.` });
+        return res.status(404).json({ error: `No student account found with email ${cleanEmail}. Ask student to sign up first.` });
       }
       if (studentRes.rows[0].role !== 'student') {
-        return res.status(400).json({ error: 'The specified mobile number belongs to a parent account, not a student.' });
+        return res.status(400).json({ error: 'The specified email belongs to a parent account, not a student.' });
       }
     }
 
-    // Generate 6-digit numeric OTP code
+    // 4. Generate 6-digit numeric OTP code
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpId = `otp_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    const otpId = `eotp_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
 
-    // Invalidate previous unverified OTPs for same mobile and reason
-    await pool.query('DELETE FROM otp_verifications WHERE mobile_number = $1 AND reason = $2', [cleanMobile, reason || 'general']);
+    // Invalidate previous unverified OTPs for same email & reason
+    await pool.query('DELETE FROM email_verifications WHERE LOWER(email) = $1 AND reason = $2', [cleanEmail, reason || 'general']);
 
+    // Insert with strictly 1-Minute expiration (NOW() + INTERVAL '1 minute')
     await pool.query(`
-      INSERT INTO otp_verifications (id, mobile_number, otp_code, reason, expires_at)
-      VALUES ($1, $2, $3, $4, NOW() + INTERVAL '5 minutes')
-    `, [otpId, cleanMobile, otpCode, reason || 'general']);
+      INSERT INTO email_verifications (id, email, otp_code, reason, expires_at)
+      VALUES ($1, $2, $3, $4, NOW() + INTERVAL '1 minute')
+    `, [otpId, cleanEmail, otpCode, reason || 'general']);
 
-    // Attempt real SMS delivery via Fast2SMS
-    const FAST2SMS_API_KEY = process.env.FAST2SMS_API_KEY || "xsGEzy48CIZH0AWSQJ3RkVfDpM6tnUwbP72vea9XjTlgFhiOr5l9N4utRcIDzVU5ZKFhrk7PW1EYn6HJ";
-    try {
-      fetch(`https://www.fast2sms.com/dev/bulkV2?authorization=${FAST2SMS_API_KEY}&variables_values=${otpCode}&route=otp&numbers=${cleanMobile}`)
-        .then(r => r.json())
-        .then(d => {
-          if (d?.return) {
-            console.log(`✅ [Fast2SMS] Real carrier SMS successfully sent to +91 ${cleanMobile}!`);
-          } else {
-            console.log(`ℹ️ [Fast2SMS Note]:`, d?.message || d);
-          }
-        })
-        .catch(e => console.error('Fast2SMS Network Error:', e.message));
-    } catch (e) {}
+    // Send the branded email
+    await sendOtpEmail(cleanEmail, otpCode, reason);
 
-    console.log(`📲 [SMS Dispatcher] OTP for ${cleanMobile} (${reason}): [ ${otpCode} ]`);
+    console.log(`📧 [Email OTP] Generated for ${cleanEmail} (${reason}): [ ${otpCode} ] — Valid for 60s`);
 
     res.json({
       success: true,
-      message: `Verification code sent to +91 ${cleanMobile}`,
-      mobileNumber: cleanMobile,
-      otp: otpCode, // Provided for live in-app simulation toast & testing
-      expiresInSeconds: 300,
+      message: `A 6-digit verification code was sent to ${cleanEmail} (valid for 1 minute).`,
+      email: cleanEmail,
+      otp: otpCode, // Provided for live simulation/toast
+      expiresInSeconds: 60,
     });
   } catch (err) {
-    console.error('Send OTP error:', err);
-    res.status(500).json({ error: 'Failed to send verification code.' });
+    console.error('Send Email OTP error:', err);
+    res.status(500).json({ error: 'Failed to send email verification code.' });
   }
 });
 
-// Verify Verification Code (OTP)
-app.post('/api/auth/verify-otp', async (req, res) => {
-  const { mobileNumber, otp, reason } = req.body;
-  if (!mobileNumber || !otp) {
-    return res.status(400).json({ error: 'Mobile number and verification code are required' });
+// Verify Email Code (Checks 1-Minute Expiry)
+app.post('/api/auth/verify-email-otp', async (req, res) => {
+  const { email, otp, reason } = req.body;
+  if (!email || !otp) {
+    return res.status(400).json({ error: 'Email and 6-digit verification code are required.' });
   }
 
-  const cleanMobile = mobileNumber.replace(/\D/g, '');
+  const cleanEmail = email.trim().toLowerCase();
   const cleanOtp = otp.toString().trim();
 
   try {
     const result = await pool.query(`
-      SELECT * FROM otp_verifications
-      WHERE mobile_number = $1 AND reason = $2 AND verified = FALSE AND expires_at > NOW()
+      SELECT * FROM email_verifications
+      WHERE LOWER(email) = $1 AND reason = $2 AND verified = FALSE AND expires_at > NOW()
       ORDER BY created_at DESC
       LIMIT 1
-    `, [cleanMobile, reason || 'general']);
+    `, [cleanEmail, reason || 'general']);
 
     if (result.rows.length === 0) {
-      return res.status(400).json({ error: 'Verification code has expired or was not requested. Please request a new code.' });
+      return res.status(400).json({ 
+        error: 'Verification code has expired (1-minute limit) or was not requested. Please request a new code.' 
+      });
     }
 
     const record = result.rows[0];
     if (record.otp_code !== cleanOtp) {
-      await pool.query('UPDATE otp_verifications SET attempts = attempts + 1 WHERE id = $1', [record.id]);
-      return res.status(400).json({ error: 'Invalid verification code. Please check and try again.' });
+      await pool.query('UPDATE email_verifications SET attempts = attempts + 1 WHERE id = $1', [record.id]);
+      return res.status(400).json({ error: 'Invalid verification code. Please check your email and try again.' });
     }
 
     // Mark verified
-    await pool.query('UPDATE otp_verifications SET verified = TRUE WHERE id = $1', [record.id]);
+    await pool.query('UPDATE email_verifications SET verified = TRUE WHERE id = $1', [record.id]);
 
     res.json({
       success: true,
-      message: 'Mobile number verified successfully',
-      mobileNumber: cleanMobile,
+      message: 'Email verified successfully!',
+      email: cleanEmail,
     });
   } catch (err) {
-    console.error('Verify OTP error:', err);
-    res.status(500).json({ error: 'Failed to verify OTP code' });
+    console.error('Verify Email OTP error:', err);
+    res.status(500).json({ error: 'Failed to verify email code.' });
   }
 });
 
-// Login
+// User Login (Email + Password + Role Check)
 app.post('/api/auth/login', async (req, res) => {
-  const { mobileNumber, password, role } = req.body;
-  if (!mobileNumber || !password) {
-    return res.status(400).json({ error: 'Mobile number and password required' });
+  const { email, password, role } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email address and password are required.' });
   }
 
+  const cleanEmail = email.trim().toLowerCase();
+
   try {
-    const result = await pool.query('SELECT * FROM users WHERE mobile_number = $1', [mobileNumber]);
+    const result = await pool.query('SELECT * FROM users WHERE LOWER(email) = $1', [cleanEmail]);
     if (result.rows.length === 0) {
       return res.status(401).json({ error: 'Account not found. Please create an account.' });
     }
@@ -340,8 +543,6 @@ app.post('/api/auth/login', async (req, res) => {
     const requestedRole = role || 'student';
 
     // Strict Role Enforcement:
-    // 1. Student account cannot log in through Parent portal
-    // 2. Parent account cannot log in through Student portal
     if (requestedRole === 'student' && accountRole === 'parent') {
       return res.status(403).json({
         error: 'This account is registered as a Parent / Guardian. Please use the Parent Login portal.',
@@ -358,124 +559,107 @@ app.post('/api/auth/login', async (req, res) => {
       user: {
         id: user.id,
         name: user.name,
-        mobileNumber: user.mobile_number,
+        email: user.email,
         role: accountRole,
         isSetupComplete: user.is_setup_complete,
       },
     });
   } catch (err) {
     console.error('Login error:', err);
-    res.status(500).json({ error: 'Server error during login' });
+    res.status(500).json({ error: 'Server error during login.' });
   }
 });
 
-// Signup
+// User Signup (Name + Email + Password + Role)
 app.post('/api/auth/signup', async (req, res) => {
-  const { name, mobileNumber, password, role } = req.body;
-  if (!name || !mobileNumber || !password) {
-    return res.status(400).json({ error: 'Name, mobile number, and password required' });
+  const { name, email, password, role } = req.body;
+  if (!name || !email || !password) {
+    return res.status(400).json({ error: 'Name, email address, and password are required.' });
   }
 
+  const cleanEmail = email.trim().toLowerCase();
   const userRole = role || 'student';
 
   try {
-    const existing = await pool.query('SELECT id FROM users WHERE mobile_number = $1', [mobileNumber]);
+    const existing = await pool.query('SELECT id FROM users WHERE LOWER(email) = $1', [cleanEmail]);
     if (existing.rows.length > 0) {
-      return res.status(400).json({ error: 'An account with this mobile number already exists.' });
+      return res.status(400).json({ error: 'An account with this email address already exists.' });
     }
 
     const userId = `user_${Date.now()}`;
     await pool.query(
-      'INSERT INTO users (id, name, mobile_number, password, role, is_setup_complete) VALUES ($1, $2, $3, $4, $5, $6)',
-      [userId, name, mobileNumber, password, userRole, userRole === 'parent']
+      'INSERT INTO users (id, name, email, password, role, is_setup_complete) VALUES ($1, $2, $3, $4, $5, $6)',
+      [userId, name, cleanEmail, password, userRole, userRole === 'parent']
     );
 
     res.json({
       user: {
         id: userId,
         name,
-        mobileNumber,
+        email: cleanEmail,
         role: userRole,
         isSetupComplete: userRole === 'parent',
       },
     });
   } catch (err) {
     console.error('Signup error:', err);
-    res.status(500).json({ error: 'Server error during signup' });
+    res.status(500).json({ error: 'Server error during signup.' });
   }
 });
 
-// Reset Password
+// Reset Password via Email
 app.post('/api/auth/forgot-password', async (req, res) => {
-  const { mobileNumber, newPassword } = req.body;
-  if (!mobileNumber || !newPassword) {
-    return res.status(400).json({ error: 'Mobile number and new password required' });
+  const { email, newPassword } = req.body;
+  if (!email || !newPassword) {
+    return res.status(400).json({ error: 'Email and new password required.' });
   }
+
+  const cleanEmail = email.trim().toLowerCase();
 
   try {
     const result = await pool.query(
-      'UPDATE users SET password = $1 WHERE mobile_number = $2 RETURNING id',
-      [newPassword, mobileNumber]
+      'UPDATE users SET password = $1 WHERE LOWER(email) = $2 RETURNING id',
+      [newPassword, cleanEmail]
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'No account found with this mobile number.' });
+      return res.status(404).json({ error: 'No account found with this email address.' });
     }
 
-    res.json({ success: true, message: 'Password updated successfully' });
+    res.json({ success: true, message: 'Password updated successfully.' });
   } catch (err) {
     console.error('Password reset error:', err);
-    res.status(500).json({ error: 'Server error during password reset' });
+    res.status(500).json({ error: 'Server error during password reset.' });
   }
 });
 
-// === PARENT & ADMIN MONITORING ROUTES ===
+// === PARENT & GUARDIAN MONITORING ROUTES ===
 
-// Link a student child to parent (with OTP verification)
+// Link Student Child via Student Email
 app.post('/api/parent/link-child', async (req, res) => {
-  const { parentId, childMobile, otp } = req.body;
-  if (!parentId || !childMobile) {
-    return res.status(400).json({ error: 'Parent ID and Student mobile number are required.' });
+  const { parentId, childEmail } = req.body;
+  if (!parentId || !childEmail) {
+    return res.status(400).json({ error: 'Parent ID and Student email are required.' });
   }
 
+  const cleanChildEmail = childEmail.trim().toLowerCase();
+
   try {
-    // Check if student exists
-    const studentRes = await pool.query('SELECT id, name, mobile_number, role, is_setup_complete FROM users WHERE mobile_number = $1', [childMobile]);
+    const studentRes = await pool.query('SELECT id, name, email, role, is_setup_complete FROM users WHERE LOWER(email) = $1', [cleanChildEmail]);
     if (studentRes.rows.length === 0) {
-      return res.status(404).json({ error: `No student account found with mobile ${childMobile}. Ask student to sign up first.` });
+      return res.status(404).json({ error: `No student account found with email ${cleanChildEmail}. Ask student to sign up first.` });
     }
 
     const student = studentRes.rows[0];
     if (student.role !== 'student') {
-      return res.status(400).json({ error: 'The specified mobile number does not belong to a student account.' });
-    }
-
-    // If OTP was provided, verify it
-    if (otp) {
-      const otpRes = await pool.query(`
-        SELECT * FROM otp_verifications
-        WHERE mobile_number = $1 AND reason = 'link_child' AND verified = FALSE AND expires_at > NOW()
-        ORDER BY created_at DESC
-        LIMIT 1
-      `, [childMobile]);
-
-      if (otpRes.rows.length === 0) {
-        return res.status(400).json({ error: 'Verification code for child has expired. Please request a new code.' });
-      }
-
-      if (otpRes.rows[0].otp_code !== otp.toString().trim()) {
-        return res.status(400).json({ error: 'Incorrect child verification code. Please ask child for the code.' });
-      }
-
-      // Mark OTP verified
-      await pool.query('UPDATE otp_verifications SET verified = TRUE WHERE id = $1', [otpRes.rows[0].id]);
+      return res.status(400).json({ error: 'The specified email belongs to a parent account, not a student.' });
     }
 
     const linkId = `link_${parentId}_${student.id}`;
 
     await pool.query(
-      'INSERT INTO parent_child_links (id, parent_id, child_mobile) VALUES ($1, $2, $3) ON CONFLICT (parent_id, child_mobile) DO NOTHING',
-      [linkId, parentId, childMobile]
+      'INSERT INTO parent_child_links (id, parent_id, child_email) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
+      [linkId, parentId, cleanChildEmail]
     );
 
     res.json({
@@ -483,7 +667,7 @@ app.post('/api/parent/link-child', async (req, res) => {
       student: {
         id: student.id,
         name: student.name,
-        mobileNumber: student.mobile_number,
+        email: student.email,
       },
     });
   } catch (err) {
@@ -492,14 +676,14 @@ app.post('/api/parent/link-child', async (req, res) => {
   }
 });
 
-// Get parent's linked children
+// Get Parent's Linked Children
 app.get('/api/parent/children/:parentId', async (req, res) => {
   const { parentId } = req.params;
   try {
     const result = await pool.query(`
-      SELECT u.id, u.name, u.mobile_number as "mobileNumber", u.is_setup_complete as "isSetupComplete", l.created_at as "linkedAt"
+      SELECT u.id, u.name, u.email, u.is_setup_complete as "isSetupComplete", l.created_at as "linkedAt"
       FROM parent_child_links l
-      JOIN users u ON l.child_mobile = u.mobile_number
+      JOIN users u ON LOWER(l.child_email) = LOWER(u.email)
       WHERE l.parent_id = $1
       ORDER BY l.created_at DESC
     `, [parentId]);
@@ -507,19 +691,20 @@ app.get('/api/parent/children/:parentId', async (req, res) => {
     res.json({ children: result.rows });
   } catch (err) {
     console.error('Fetch children error:', err);
-    res.status(500).json({ error: 'Failed to fetch linked children' });
+    res.status(500).json({ error: 'Failed to fetch linked children.' });
   }
 });
 
-// Unlink a child
+// Unlink Child
 app.delete('/api/parent/unlink-child', async (req, res) => {
-  const { parentId, childMobile } = req.body;
+  const { parentId, childEmail } = req.body;
+  const cleanEmail = (childEmail || '').trim().toLowerCase();
   try {
-    await pool.query('DELETE FROM parent_child_links WHERE parent_id = $1 AND child_mobile = $2', [parentId, childMobile]);
+    await pool.query('DELETE FROM parent_child_links WHERE parent_id = $1 AND LOWER(child_email) = $2', [parentId, cleanEmail]);
     res.json({ success: true });
   } catch (err) {
     console.error('Unlink child error:', err);
-    res.status(500).json({ error: 'Failed to unlink student' });
+    res.status(500).json({ error: 'Failed to unlink student.' });
   }
 });
 
@@ -529,7 +714,7 @@ app.get('/api/data/:userId/:monthYear', async (req, res) => {
 
   try {
     // 1. Get User
-    const userRes = await pool.query('SELECT id, name, mobile_number, role, is_setup_complete FROM users WHERE id = $1', [userId]);
+    const userRes = await pool.query('SELECT id, name, email, role, is_setup_complete FROM users WHERE id = $1', [userId]);
     const user = userRes.rows[0] || null;
 
     // 2. Get Budget
@@ -575,18 +760,17 @@ app.get('/api/data/:userId/:monthYear', async (req, res) => {
       hostelExpenses,
     });
   } catch (err) {
-    console.error('Fetch data error:', err);
-    res.status(500).json({ error: 'Failed to retrieve data' });
+    console.error('Data fetch error:', err);
+    res.status(500).json({ error: 'Failed to fetch user data' });
   }
 });
 
-// === BUDGET ROUTE ===
+// Update Budget
 app.post('/api/budget', async (req, res) => {
-  const { userId, monthYear, name, monthlyBudget } = req.body;
+  const { userId, monthYear, amount } = req.body;
+  const monthlyBudget = parseFloat(amount);
+
   try {
-    if (name) {
-      await pool.query('UPDATE users SET name = $1, is_setup_complete = TRUE WHERE id = $2', [name, userId]);
-    }
     const budgetId = `bgt_${userId}_${monthYear}`;
     await pool.query(`
       INSERT INTO budgets (id, user_id, month_year, monthly_budget)
@@ -602,21 +786,22 @@ app.post('/api/budget', async (req, res) => {
   }
 });
 
-// === EXPENSE ROUTES ===
+// === EXPENSE ROUTES (WITH THRESHOLD-BASED EMAIL ALERTS) ===
 app.post('/api/expenses', async (req, res) => {
   const { userId, title, amount, category, date, note, type, refId } = req.body;
   const id = `exp_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
+  const numericAmount = parseFloat(amount);
 
   try {
     await pool.query(
       'INSERT INTO expenses (id, user_id, title, amount, category, date, note, type, ref_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
-      [id, userId, title, amount, category, date, note || null, type || 'personal', refId || null]
+      [id, userId, title, numericAmount, category, date, note || null, type || 'personal', refId || null]
     );
 
     res.json({
       id,
       title,
-      amount: parseFloat(amount),
+      amount: numericAmount,
       category,
       date,
       note,
@@ -624,6 +809,74 @@ app.post('/api/expenses', async (req, res) => {
       refId,
       createdAt: new Date().toISOString(),
     });
+
+    // Asynchronously evaluate if monthly budget is exceeded or expense exceeds single threshold for email alert
+    (async () => {
+      try {
+        // 1. Fetch student user details
+        const studentRes = await pool.query('SELECT name, email FROM users WHERE id = $1', [userId]);
+        if (studentRes.rows.length === 0) return;
+        const student = studentRes.rows[0];
+        const studentEmail = student.email;
+        const studentName = student.name || 'Student';
+
+        // 2. Fetch user notification settings for threshold
+        const settingsRes = await pool.query('SELECT custom_threshold_enabled, custom_threshold_amount FROM notification_settings WHERE user_id = $1', [userId]);
+        const settings = settingsRes.rows[0];
+        const threshold = (settings && settings.custom_threshold_enabled) 
+          ? parseFloat(settings.custom_threshold_amount || 500)
+          : 500; // Default single transaction threshold ₹500
+
+        const expDate = date || new Date().toISOString().split('T')[0];
+        const currentMonthYear = expDate.slice(0, 7);
+
+        const budgetRes = await pool.query(
+          'SELECT monthly_budget FROM budgets WHERE user_id = $1 AND month_year = $2',
+          [userId, currentMonthYear]
+        );
+        const monthlyBudget = budgetRes.rows.length > 0 ? parseFloat(budgetRes.rows[0].monthly_budget) : 1000;
+
+        const totalSpentRes = await pool.query(
+          "SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = $1 AND date LIKE $2",
+          [userId, `${currentMonthYear}%`]
+        );
+        const totalSpent = parseFloat(totalSpentRes.rows[0].total) || 0;
+        const remaining = Math.max(0, monthlyBudget - totalSpent);
+
+        // Check Trigger Conditions:
+        // A. Monthly limit exceeded (total spent > monthly budget)
+        const isMonthlyLimitExceeded = monthlyBudget > 0 && totalSpent > monthlyBudget;
+        // B. Single expense exceeds specified threshold
+        const isSingleLimitExceeded = numericAmount >= threshold;
+
+        if (isMonthlyLimitExceeded || isSingleLimitExceeded) {
+          const alertType = isMonthlyLimitExceeded ? 'monthly_limit_exceeded' : 'single_limit_exceeded';
+
+          // Query linked parents
+          const parentsRes = await pool.query(`
+            SELECT u.email 
+            FROM parent_child_links pcl
+            JOIN users u ON pcl.parent_id = u.id
+            WHERE LOWER(pcl.child_email) = $1
+          `, [studentEmail.toLowerCase()]);
+
+          const parentEmails = parentsRes.rows.map(r => r.email).filter(Boolean);
+
+          await sendExpenseAlertEmail({
+            studentEmail,
+            parentEmails,
+            expenseData: { title, amount: numericAmount, category, date: expDate },
+            monthlyBudget,
+            totalSpent,
+            remainingBudget: remaining,
+            alertType,
+            studentName,
+          });
+        }
+      } catch (alertErr) {
+        console.error('Expense alert background check error:', alertErr);
+      }
+    })();
   } catch (err) {
     console.error('Add expense error:', err);
     res.status(500).json({ error: 'Failed to add expense' });
@@ -637,7 +890,7 @@ app.put('/api/expenses/:id', async (req, res) => {
   try {
     await pool.query(
       'UPDATE expenses SET title = $1, amount = $2, category = $3, date = $4, note = $5 WHERE id = $6',
-      [title, amount, category, date, note || null, id]
+      [title, parseFloat(amount), category, date, note || null, id]
     );
     res.json({ success: true });
   } catch (err) {
@@ -671,19 +924,19 @@ app.post('/api/split-bills', async (req, res) => {
     res.json({
       id,
       title,
-      totalAmount: parseFloat(totalAmount),
+      totalAmount,
       paidBy,
       participants,
       splitType,
       date,
-      userShare: parseFloat(userShare),
-      totalReceivable: parseFloat(totalReceivable),
-      totalPayable: parseFloat(totalPayable),
+      userShare,
+      totalReceivable,
+      totalPayable,
       createdAt: new Date().toISOString(),
     });
   } catch (err) {
     console.error('Add split bill error:', err);
-    res.status(500).json({ error: 'Failed to save split bill' });
+    res.status(500).json({ error: 'Failed to add split bill' });
   }
 });
 
@@ -712,19 +965,19 @@ app.post('/api/hostel-expenses', async (req, res) => {
     res.json({
       id,
       title,
-      totalAmount: parseFloat(totalAmount),
+      totalAmount,
       paidBy,
       members,
       splitMethod,
       shares,
       date,
-      userShare: parseFloat(userShare),
+      userShare,
       roomName: roomName || 'Room 204',
       createdAt: new Date().toISOString(),
     });
   } catch (err) {
     console.error('Add hostel expense error:', err);
-    res.status(500).json({ error: 'Failed to save hostel expense' });
+    res.status(500).json({ error: 'Failed to add hostel expense' });
   }
 });
 
@@ -739,127 +992,58 @@ app.delete('/api/hostel-expenses/:id', async (req, res) => {
   }
 });
 
-// === NOTIFICATION ROUTES ===
-
-// Get all notifications and settings for user
+// === NOTIFICATIONS ROUTES ===
 app.get('/api/notifications/:userId', async (req, res) => {
   const { userId } = req.params;
   try {
-    const notifsResult = await pool.query(
-      'SELECT id, user_id as "userId", type, title, message, read, event_key as "eventKey", monthly_cycle as "monthlyCycle", created_at as "createdAt" FROM notifications WHERE user_id = $1 ORDER BY created_at DESC',
+    const result = await pool.query(
+      'SELECT id, type, title, message, read, event_key as "eventKey", monthly_cycle as "monthlyCycle", created_at as "createdAt" FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50',
       [userId]
     );
-
-    const settingsResult = await pool.query(
-      'SELECT * FROM notification_settings WHERE user_id = $1',
-      [userId]
-    );
-
-    let settings = {
-      browserNotifications: true,
-      budgetAlerts: true,
-      customThresholdEnabled: false,
-      customThresholdAmount: 700,
-      spendingAlerts: true,
-      predictionAlerts: true,
-      splitBillAlerts: true,
-      hostelAlerts: true,
-      savingTips: true,
-      dispatchedKeys: [],
-    };
-
-    if (settingsResult.rows.length > 0) {
-      const row = settingsResult.rows[0];
-      settings = {
-        browserNotifications: row.browser_notifications ?? true,
-        budgetAlerts: row.budget_alerts ?? true,
-        customThresholdEnabled: row.custom_threshold_enabled ?? false,
-        customThresholdAmount: parseFloat(row.custom_threshold_amount || 700),
-        spendingAlerts: row.spending_alerts ?? true,
-        predictionAlerts: row.prediction_alerts ?? true,
-        splitBillAlerts: row.split_bill_alerts ?? true,
-        hostelAlerts: row.hostel_alerts ?? true,
-        savingTips: row.saving_tips ?? true,
-        dispatchedKeys: row.dispatched_keys || [],
-      };
-    }
-
-    res.json({
-      notifications: notifsResult.rows,
-      settings,
-    });
+    res.json({ notifications: result.rows });
   } catch (err) {
     console.error('Fetch notifications error:', err);
     res.status(500).json({ error: 'Failed to fetch notifications' });
   }
 });
 
-// Create / Dispatch a notification with strict duplicate eventKey prevention
 app.post('/api/notifications', async (req, res) => {
   const { userId, type, title, message, eventKey, monthlyCycle } = req.body;
-  if (!userId || !title || !message || !eventKey) {
-    return res.status(400).json({ error: 'Missing required notification fields' });
-  }
+  const id = `notif_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
 
   try {
-    // Check if eventKey already exists in notifications table
-    const existing = await pool.query(
-      'SELECT id, user_id as "userId", type, title, message, read, event_key as "eventKey", monthly_cycle as "monthlyCycle", created_at as "createdAt" FROM notifications WHERE user_id = $1 AND event_key = $2',
-      [userId, eventKey]
+    await pool.query(
+      'INSERT INTO notifications (id, user_id, type, title, message, event_key, monthly_cycle) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+      [id, userId, type, title, message, eventKey, monthlyCycle]
     );
-
-    if (existing.rows.length > 0) {
-      return res.json({
-        duplicate: true,
-        message: 'Notification with this eventKey already dispatched',
-        notification: existing.rows[0],
-      });
-    }
-
-    const id = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const result = await pool.query(
-      'INSERT INTO notifications (id, user_id, type, title, message, read, event_key, monthly_cycle) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, user_id as "userId", type, title, message, read, event_key as "eventKey", monthly_cycle as "monthlyCycle", created_at as "createdAt"',
-      [id, userId, type, title, message, false, eventKey, monthlyCycle || '2026-08']
-    );
-
-    // Update dispatched_keys in notification_settings
-    await pool.query(`
-      INSERT INTO notification_settings (user_id, dispatched_keys)
-      VALUES ($1, jsonb_build_array($2::text))
-      ON CONFLICT (user_id)
-      DO UPDATE SET dispatched_keys = (
-        CASE 
-          WHEN notification_settings.dispatched_keys ? $2 THEN notification_settings.dispatched_keys
-          ELSE notification_settings.dispatched_keys || jsonb_build_array($2::text)
-        END
-      ),
-      updated_at = NOW()
-    `, [userId, eventKey]);
 
     res.json({
-      success: true,
-      duplicate: false,
-      notification: result.rows[0],
+      id,
+      type,
+      title,
+      message,
+      read: false,
+      eventKey,
+      monthlyCycle,
+      createdAt: new Date().toISOString(),
     });
   } catch (err) {
-    console.error('Create notification error:', err);
+    console.error('Add notification error:', err);
     res.status(500).json({ error: 'Failed to record notification' });
   }
 });
 
-// Mark single notification as read
-app.put('/api/notifications/:id/read', async (req, res) => {
+app.put('/api/notifications/read/:id', async (req, res) => {
   const { id } = req.params;
   try {
     await pool.query('UPDATE notifications SET read = TRUE WHERE id = $1', [id]);
     res.json({ success: true });
   } catch (err) {
     console.error('Mark read error:', err);
-    res.status(500).json({ error: 'Failed to mark notification as read' });
+    res.status(500).json({ error: 'Failed to mark as read' });
   }
 });
 
-// Mark all notifications as read for user
 app.put('/api/notifications/read-all/:userId', async (req, res) => {
   const { userId } = req.params;
   try {
@@ -871,7 +1055,6 @@ app.put('/api/notifications/read-all/:userId', async (req, res) => {
   }
 });
 
-// Clear/Delete all notifications for user
 app.delete('/api/notifications/:userId', async (req, res) => {
   const { userId } = req.params;
   try {
@@ -883,7 +1066,43 @@ app.delete('/api/notifications/:userId', async (req, res) => {
   }
 });
 
-// Save notification settings
+// Notification Settings
+app.get('/api/notifications/settings/:userId', async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const result = await pool.query(
+      `SELECT 
+        browser_notifications as "browserNotifications",
+        budget_alerts as "budgetAlerts",
+        custom_threshold_enabled as "customThresholdEnabled",
+        custom_threshold_amount as "customThresholdAmount",
+        spending_alerts as "spendingAlerts",
+        prediction_alerts as "predictionAlerts",
+        split_bill_alerts as "splitBillAlerts",
+        hostel_alerts as "hostelAlerts",
+        saving_tips as "savingTips",
+        dispatched_keys as "dispatchedKeys"
+      FROM notification_settings WHERE user_id = $1`,
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({ settings: null });
+    }
+
+    const s = result.rows[0];
+    res.json({
+      settings: {
+        ...s,
+        customThresholdAmount: parseFloat(s.customThresholdAmount),
+      },
+    });
+  } catch (err) {
+    console.error('Fetch settings error:', err);
+    res.status(500).json({ error: 'Failed to fetch notification settings' });
+  }
+});
+
 app.post('/api/notifications/settings', async (req, res) => {
   const { 
     userId, 
@@ -914,11 +1133,11 @@ app.post('/api/notifications/settings', async (req, res) => {
         prediction_alerts, 
         split_bill_alerts, 
         hostel_alerts, 
-        saving_tips,
-        updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+        saving_tips
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       ON CONFLICT (user_id)
-      DO UPDATE SET 
+      DO UPDATE SET
         browser_notifications = EXCLUDED.browser_notifications,
         budget_alerts = EXCLUDED.budget_alerts,
         custom_threshold_enabled = EXCLUDED.custom_threshold_enabled,
@@ -928,13 +1147,13 @@ app.post('/api/notifications/settings', async (req, res) => {
         split_bill_alerts = EXCLUDED.split_bill_alerts,
         hostel_alerts = EXCLUDED.hostel_alerts,
         saving_tips = EXCLUDED.saving_tips,
-        updated_at = NOW()
+        updated_at = NOW();
     `, [
       userId,
       browserNotifications ?? true,
       budgetAlerts ?? true,
       customThresholdEnabled ?? false,
-      customThresholdAmount ?? 700,
+      customThresholdAmount ?? 500,
       spendingAlerts ?? true,
       predictionAlerts ?? true,
       splitBillAlerts ?? true,
@@ -944,36 +1163,11 @@ app.post('/api/notifications/settings', async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error('Save notification settings error:', err);
-    res.status(500).json({ error: 'Failed to save notification settings' });
+    console.error('Save settings error:', err);
+    res.status(500).json({ error: 'Failed to save settings' });
   }
 });
 
-// Save Web Push Subscription
-app.post('/api/notifications/subscribe', async (req, res) => {
-  const { userId, subscription } = req.body;
-  if (!userId || !subscription) {
-    return res.status(400).json({ error: 'User ID and subscription required' });
-  }
-
-  try {
-    const id = `sub_${Date.now()}`;
-    await pool.query(`
-      INSERT INTO push_subscriptions (id, user_id, subscription)
-      VALUES ($1, $2, $3)
-      ON CONFLICT (user_id)
-      DO UPDATE SET subscription = EXCLUDED.subscription, created_at = NOW()
-    `, [id, userId, JSON.stringify(subscription)]);
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error('Save push subscription error:', err);
-    res.status(500).json({ error: 'Failed to save push subscription' });
-  }
-});
-
-// Start Server
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Broke OS Neon Backend running at http://0.0.0.0:${PORT}`);
+  console.log(`🚀 Broke OS Backend running at http://0.0.0.0:${PORT}`);
 });
-

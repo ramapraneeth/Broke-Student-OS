@@ -5,7 +5,7 @@ import { CATEGORY_DETAILS, ExpenseCategory, Expense, LinkedChild } from '../../t
 import { 
   Users, 
   UserPlus, 
-  Phone, 
+  Mail, 
   CheckCircle2, 
   AlertTriangle, 
   Trash2, 
@@ -44,7 +44,7 @@ export const AdminScreen: React.FC = () => {
   } = useFinance();
   const navigate = useNavigate();
 
-  const [inputMobile, setInputMobile] = useState('');
+  const [inputEmail, setInputEmail] = useState('');
   const [isLinking, setIsLinking] = useState(false);
   const [linkMsg, setLinkMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showAddChildModal, setShowAddChildModal] = useState(false);
@@ -56,20 +56,20 @@ export const AdminScreen: React.FC = () => {
 
   const handleLinkSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanMobile = inputMobile.replace(/\D/g, '');
-    if (cleanMobile.length !== 10) {
-      setLinkMsg({ type: 'error', text: 'Please enter a valid 10-digit mobile number.' });
+    const cleanEmail = inputEmail.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      setLinkMsg({ type: 'error', text: 'Please enter a valid student email address.' });
       return;
     }
 
     setIsLinking(true);
     setLinkMsg(null);
-    const result = await linkChild(cleanMobile);
+    const result = await linkChild(cleanEmail);
     setIsLinking(false);
 
     if (result.success) {
       setLinkMsg({ type: 'success', text: `Successfully linked ${result.student?.name || 'student'}!` });
-      setInputMobile('');
+      setInputEmail('');
       setTimeout(() => {
         setShowAddChildModal(false);
         setLinkMsg(null);
@@ -411,8 +411,8 @@ export const AdminScreen: React.FC = () => {
                               </span>
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#64748B', fontSize: '0.8rem', marginTop: '3px' }}>
-                              <Phone size={12} />
-                              <span>{child.mobileNumber}</span>
+                              <Mail size={12} />
+                              <span>{child.email}</span>
                             </div>
                           </div>
                         </div>
@@ -423,7 +423,7 @@ export const AdminScreen: React.FC = () => {
                           onClick={(e) => {
                             e.stopPropagation();
                             if (window.confirm(`Unlink ${child.name} from your Family Safety account?`)) {
-                              unlinkChild(child.mobileNumber);
+                              unlinkChild(child.email);
                             }
                           }}
                           style={{
@@ -532,7 +532,7 @@ export const AdminScreen: React.FC = () => {
                     {selectedChild.name}
                   </h2>
                   <span style={{ fontSize: '0.75rem', color: '#64748B' }}>
-                    Mobile: {selectedChild.mobileNumber} • Month: {monthYear}
+                    Email: {selectedChild.email} • Month: {monthYear}
                   </span>
                 </div>
               </div>
@@ -830,23 +830,22 @@ export const AdminScreen: React.FC = () => {
             </div>
 
             <p style={{ fontSize: '0.82rem', color: '#64748B', marginBottom: '16px' }}>
-              Enter your student's registered 10-digit mobile number to link and monitor their monthly allowance and spending in real-time.
+              Enter your student's registered college/personal email address to link and monitor their allowance and spending in real-time.
             </p>
 
             <form onSubmit={handleLinkSubmit}>
               <div className="form-group">
-                <label className="form-label" htmlFor="link-child-mobile">Student Mobile Number</label>
+                <label className="form-label" htmlFor="link-child-email">Student Email Address</label>
                 <div style={{ position: 'relative' }}>
-                  <Phone size={16} color="#94A3B8" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
+                  <Mail size={16} color="#94A3B8" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
                   <input
-                    id="link-child-mobile"
-                    type="tel"
+                    id="link-child-email"
+                    type="email"
                     className="input-field"
                     style={{ paddingLeft: '38px' }}
-                    placeholder="10-digit mobile number"
-                    value={inputMobile}
-                    onChange={e => setInputMobile(e.target.value)}
-                    maxLength={10}
+                    placeholder="student@university.edu"
+                    value={inputEmail}
+                    onChange={e => setInputEmail(e.target.value)}
                     required
                   />
                 </div>

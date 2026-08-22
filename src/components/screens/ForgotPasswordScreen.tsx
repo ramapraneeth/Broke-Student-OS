@@ -1,33 +1,36 @@
 import React, { useState } from 'react';
 import { useFinance } from '../../context/FinanceContext';
 import { useNavigate, Link } from 'react-router-dom';
-import { KeyRound, ArrowRight, ArrowLeft, Phone, Lock, CheckCircle2 } from 'lucide-react';
+import { KeyRound, ArrowRight, ArrowLeft, Mail, Lock, CheckCircle2 } from 'lucide-react';
+import { EmailVerificationModal } from '../common/EmailVerificationModal';
 
 export const ForgotPasswordScreen: React.FC = () => {
-  const { resetPassword } = useFinance();
+  const { resetPassword, sendEmailOtp, verifyEmailOtp } = useFinance();
   const navigate = useNavigate();
 
-  const [mobileNumber, setMobileNumber] = useState('');
+  const [email, setEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  const [errorMobile, setErrorMobile] = useState('');
+  const [errorEmail, setErrorEmail] = useState('');
   const [errorPassword, setErrorPassword] = useState('');
   const [errorConfirm, setErrorConfirm] = useState('');
   const [isSuccess, setIsSuccess] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const [showOtpModal, setShowOtpModal] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
 
     let isValid = true;
-    const cleanMobile = mobileNumber.replace(/\D/g, '');
-    if (!cleanMobile || cleanMobile.length !== 10) {
-      setErrorMobile('Please enter a valid 10-digit mobile number.');
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      setErrorEmail('Please enter a valid registered email address.');
       isValid = false;
     } else {
-      setErrorMobile('');
+      setErrorEmail('');
     }
 
     if (!newPassword || newPassword.length < 4) {
@@ -47,14 +50,38 @@ export const ForgotPasswordScreen: React.FC = () => {
     if (!isValid) return;
 
     setIsSubmitting(true);
-    const result = await resetPassword(cleanMobile, newPassword);
+    // Send 1-minute security code to email
+    const otpRes = await sendEmailOtp(cleanEmail, 'forgot_password');
     setIsSubmitting(false);
 
-    if (result.success) {
-      setIsSuccess(true);
+    if (otpRes.success) {
+      setShowOtpModal(true);
     } else {
-      setErrorMobile(result.error || 'No account found with this number.');
+      setErrorEmail(otpRes.error || 'Failed to dispatch verification code.');
     }
+  };
+
+  const handleVerifyOtp = async (otpCode: string): Promise<{ success: boolean; error?: string }> => {
+    const cleanEmail = email.trim().toLowerCase();
+    const verifyRes = await verifyEmailOtp(cleanEmail, otpCode, 'forgot_password');
+    if (!verifyRes.success) {
+      return verifyRes;
+    }
+
+    // Reset password
+    const result = await resetPassword(cleanEmail, newPassword);
+    if (result.success) {
+      setShowOtpModal(false);
+      setIsSuccess(true);
+      return { success: true };
+    } else {
+      return { success: false, error: result.error || 'Failed to update password.' };
+    }
+  };
+
+  const handleResendOtp = async () => {
+    const cleanEmail = email.trim().toLowerCase();
+    return await sendEmailOtp(cleanEmail, 'forgot_password');
   };
 
   return (
@@ -100,7 +127,7 @@ export const ForgotPasswordScreen: React.FC = () => {
             Reset Password
           </h1>
           <p style={{ fontSize: '0.9rem', color: '#64748B', marginTop: '2px' }}>
-            Enter your registered mobile number to set a new password
+            Enter your registered email address to verify and set a new password
           </p>
         </div>
 
@@ -124,7 +151,7 @@ export const ForgotPasswordScreen: React.FC = () => {
             <button
               type="button"
               className="btn-primary"
-              style={{ background: '#10B981' }}
+              style={{ background: '#10B981', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
               onClick={() => navigate('/login')}
             >
               <span>Go to Login</span>
@@ -134,7 +161,7 @@ export const ForgotPasswordScreen: React.FC = () => {
         ) : (
           <form onSubmit={handleSubmit}>
             <div className="form-group">
-              <label className="form-label" htmlFor="forgot-mobile">Registered Mobile Number</label>
+              <label className="form-label" htmlFor="forgot-email">Registered Email Address</label>
               <div style={{ position: 'relative' }}>
                 <span
                   style={{
@@ -146,24 +173,23 @@ export const ForgotPasswordScreen: React.FC = () => {
                     display: 'flex',
                   }}
                 >
-                  <Phone size={18} />
+                  <Mail size={18} />
                 </span>
                 <input
-                  id="forgot-mobile"
-                  type="tel"
-                  className={`input-field ${errorMobile ? 'input-error' : ''}`}
+                  id="forgot-email"
+                  type="email"
+                  className={`input-field ${errorEmail ? 'input-error' : ''}`}
                   style={{ paddingLeft: '42px' }}
-                  placeholder="10-digit mobile number"
-                  value={mobileNumber}
+                  placeholder="yourname@example.com"
+                  value={email}
                   onChange={e => {
-                    setMobileNumber(e.target.value);
-                    if (errorMobile) setErrorMobile('');
+                    setEmail(e.target.value);
+                    if (errorEmail) setErrorEmail('');
                   }}
-                  maxLength={10}
                   required
                 />
               </div>
-              {errorMobile && <span className="error-text">⚠️ {errorMobile}</span>}
+              {errorEmail && <span className="error-text">⚠️ {errorEmail}</span>}
             </div>
 
             <div className="form-group">
@@ -186,7 +212,7 @@ export const ForgotPasswordScreen: React.FC = () => {
                   type="password"
                   className={`input-field ${errorPassword ? 'input-error' : ''}`}
                   style={{ paddingLeft: '42px' }}
-                  placeholder="Enter new password"
+                  placeholder="At least 4 characters"
                   value={newPassword}
                   onChange={e => {
                     setNewPassword(e.target.value);
@@ -218,7 +244,7 @@ export const ForgotPasswordScreen: React.FC = () => {
                   type="password"
                   className={`input-field ${errorConfirm ? 'input-error' : ''}`}
                   style={{ paddingLeft: '42px' }}
-                  placeholder="Re-enter new password"
+                  placeholder="Confirm your new password"
                   value={confirmPassword}
                   onChange={e => {
                     setConfirmPassword(e.target.value);
@@ -232,15 +258,15 @@ export const ForgotPasswordScreen: React.FC = () => {
 
             <button
               type="submit"
-              className="btn-primary"
+              className="btn btn-primary"
+              style={{ width: '100%', marginTop: '12px', padding: '14px' }}
               disabled={isSubmitting}
-              style={{ marginTop: '14px', height: '48px' }}
             >
               {isSubmitting ? (
-                <span>Resetting...</span>
+                <span>Sending Verification Code...</span>
               ) : (
                 <>
-                  <span>RESET PASSWORD</span>
+                  <span>Verify Email & Update Password</span>
                   <ArrowRight size={18} />
                 </>
               )}
@@ -248,6 +274,16 @@ export const ForgotPasswordScreen: React.FC = () => {
           </form>
         )}
       </div>
+
+      {/* 1-Minute Expiring Email OTP Verification Modal */}
+      <EmailVerificationModal
+        isOpen={showOtpModal}
+        email={email.trim().toLowerCase()}
+        reason="forgot_password"
+        onClose={() => setShowOtpModal(false)}
+        onVerify={handleVerifyOtp}
+        onResend={handleResendOtp}
+      />
     </div>
   );
 };

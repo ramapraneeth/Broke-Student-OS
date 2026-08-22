@@ -76,7 +76,7 @@ export interface HostelExpense {
 export interface UserProfile {
   id: string;
   name: string;
-  mobileNumber: string;
+  email: string;
   password?: string;
   role: 'student' | 'parent';
   isLoggedIn: boolean;
@@ -86,7 +86,7 @@ export interface UserProfile {
 export interface LinkedChild {
   id: string;
   name: string;
-  mobileNumber: string;
+  email: string;
   isSetupComplete: boolean;
   linkedAt?: string;
 }
