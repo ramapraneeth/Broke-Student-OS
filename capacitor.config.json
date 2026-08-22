@@ -1,0 +1,8 @@
+{
+  "appId": "com.brokeos.app",
+  "appName": "Broke OS",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}
