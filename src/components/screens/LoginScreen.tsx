@@ -12,12 +12,14 @@ export const LoginScreen: React.FC = () => {
   const [password, setPassword] = useState('');
   const [errorMobile, setErrorMobile] = useState('');
   const [errorPassword, setErrorPassword] = useState('');
+  const [generalError, setGeneralError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const validateAndSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
 
+    setGeneralError('');
     let isValid = true;
     const cleanMobile = mobileNumber.replace(/\D/g, '');
     if (!cleanMobile) {
@@ -50,7 +52,7 @@ export const LoginScreen: React.FC = () => {
         navigate('/');
       }
     } else {
-      setErrorPassword(result.error || 'Invalid credentials.');
+      setGeneralError(result.error || 'Invalid credentials.');
     }
   };
 
@@ -108,7 +110,10 @@ export const LoginScreen: React.FC = () => {
         >
           <button
             type="button"
-            onClick={() => setRole('student')}
+            onClick={() => {
+              setRole('student');
+              setGeneralError('');
+            }}
             style={{
               padding: '10px 8px',
               borderRadius: '9px',
@@ -132,7 +137,10 @@ export const LoginScreen: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => setRole('parent')}
+            onClick={() => {
+              setRole('parent');
+              setGeneralError('');
+            }}
             style={{
               padding: '10px 8px',
               borderRadius: '9px',
@@ -154,6 +162,29 @@ export const LoginScreen: React.FC = () => {
             <span>Parent Login</span>
           </button>
         </div>
+
+        {/* General Error Banner */}
+        {generalError && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '8px',
+              padding: '12px 14px',
+              borderRadius: '12px',
+              background: '#FEF2F2',
+              border: '1.5px solid #FECACA',
+              color: '#991B1B',
+              fontSize: '0.825rem',
+              fontWeight: 600,
+              lineHeight: 1.4,
+              marginBottom: '16px',
+            }}
+          >
+            <span style={{ fontSize: '1rem' }}>⚠️</span>
+            <span>{generalError}</span>
+          </div>
+        )}
 
         {/* Login Form */}
         <form onSubmit={validateAndSubmit}>

@@ -24,12 +24,14 @@ export const AdminLoginScreen: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [errorMobile, setErrorMobile] = useState('');
   const [errorPassword, setErrorPassword] = useState('');
+  const [generalError, setGeneralError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
 
+    setGeneralError('');
     let isValid = true;
     const cleanMobile = mobileNumber.replace(/\D/g, '');
     if (!cleanMobile) {
@@ -58,7 +60,7 @@ export const AdminLoginScreen: React.FC = () => {
     if (result.success) {
       navigate('/admin');
     } else {
-      setErrorPassword(result.error || 'Invalid parent credentials.');
+      setGeneralError(result.error || 'Invalid parent credentials.');
     }
   };
 
@@ -160,6 +162,29 @@ export const AdminLoginScreen: React.FC = () => {
             boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.05)',
           }}
         >
+          {/* Error Banner */}
+          {generalError && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '8px',
+                padding: '12px 14px',
+                borderRadius: '12px',
+                background: '#FEF2F2',
+                border: '1.5px solid #FECACA',
+                color: '#991B1B',
+                fontSize: '0.825rem',
+                fontWeight: 600,
+                lineHeight: 1.4,
+                marginBottom: '16px',
+              }}
+            >
+              <span style={{ fontSize: '1rem' }}>⚠️</span>
+              <span>{generalError}</span>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit}>
             <div className="form-group">
               <label className="form-label" htmlFor="admin-mobile">Parent Mobile Number</label>

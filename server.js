@@ -181,7 +181,7 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM users WHERE mobile_number = $1', [mobileNumber]);
     if (result.rows.length === 0) {
-      return res.status(401).json({ error: 'User not found. Please create an account.' });
+      return res.status(401).json({ error: 'Account not found. Please create an account.' });
     }
 
     const user = result.rows[0];
@@ -189,10 +189,22 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'Incorrect password.' });
     }
 
-    // Update role if explicitly provided
-    if (role && user.role !== role) {
-      await pool.query('UPDATE users SET role = $1 WHERE id = $2', [role, user.id]);
-      user.role = role;
+    const accountRole = user.role || 'student';
+    const requestedRole = role || 'student';
+
+    // Strict Role Enforcement:
+    // 1. Student account cannot log in through Parent portal
+    // 2. Parent account cannot log in through Student portal
+    if (requestedRole === 'student' && accountRole === 'parent') {
+      return res.status(403).json({
+        error: 'This account is registered as a Parent / Guardian. Please use the Parent Login portal.',
+      });
+    }
+
+    if (requestedRole === 'parent' && accountRole === 'student') {
+      return res.status(403).json({
+        error: 'This account is registered as a Student. Please use the Student Login portal.',
+      });
     }
 
     res.json({
@@ -200,7 +212,7 @@ app.post('/api/auth/login', async (req, res) => {
         id: user.id,
         name: user.name,
         mobileNumber: user.mobile_number,
-        role: user.role || role || 'student',
+        role: accountRole,
         isSetupComplete: user.is_setup_complete,
       },
     });
