@@ -18,6 +18,7 @@ import {
   sendBrowserNotification,
   evaluateAndTriggerAlerts
 } from '../utils/notificationManager';
+import { sendRealSmsOtp, verifyRealSmsOtp } from '../utils/firebase';
 
 interface FinanceContextType {
   user: UserProfile | null;
@@ -346,8 +347,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     localStorage.removeItem(STORAGE_AUTH_KEY);
   };
 
-  const sendOtp = async (mobile: string, reason: 'login' | 'signup' | 'link_child', role?: 'student' | 'parent'): Promise<{ success: boolean; otp?: string; message?: string; error?: string }> => {
+  const sendOtp = async (mobile: string, reason: 'login' | 'signup' | 'link_child', role?: 'student' | 'parent'): Promise<{ success: boolean; otp?: string; message?: string; isRealSms?: boolean; error?: string }> => {
     try {
+      // 1. Validate on backend first
       const res = await fetch('/api/auth/send-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -357,7 +359,25 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (!res.ok) {
         return { success: false, error: data.error || 'Failed to send verification code' };
       }
-      return { success: true, otp: data.otp, message: data.message };
+
+      // 2. Dispatch real carrier SMS via Firebase Phone Auth
+      const firebaseRes = await sendRealSmsOtp(mobile, 'recaptcha-container');
+      if (firebaseRes.success) {
+        return { 
+          success: true, 
+          isRealSms: true, 
+          message: `Official verification code sent via Real SMS to +91 ${mobile}`,
+          otp: data.otp // fallback test code
+        };
+      } else {
+        console.warn('Firebase SMS failed, falling back to simulated SMS:', firebaseRes.error);
+        return { 
+          success: true, 
+          isRealSms: false,
+          otp: data.otp, 
+          message: data.message 
+        };
+      }
     } catch (err) {
       return { success: false, error: 'Network error sending verification code' };
     }
@@ -365,6 +385,21 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const verifyOtp = async (mobile: string, otp: string, reason: 'login' | 'signup' | 'link_child'): Promise<{ success: boolean; error?: string }> => {
     try {
+      // 1. Try Firebase real SMS confirmation first
+      const firebaseVerify = await verifyRealSmsOtp(otp);
+      if (firebaseVerify.success) {
+        // Also notify backend
+        try {
+          await fetch('/api/auth/verify-otp', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mobileNumber: mobile, otp, reason }),
+          });
+        } catch (e) {}
+        return { success: true };
+      }
+
+      // 2. Fallback to backend DB verification
       const res = await fetch('/api/auth/verify-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -372,7 +407,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       });
       const data = await res.json();
       if (!res.ok) {
-        return { success: false, error: data.error || 'Invalid verification code' };
+        return { success: false, error: firebaseVerify.error || data.error || 'Invalid verification code' };
       }
       return { success: true };
     } catch (err) {

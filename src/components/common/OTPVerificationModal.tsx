@@ -247,8 +247,8 @@ export const OTPVerificationModal: React.FC<OTPVerificationModalProps> = ({
           </p>
         </div>
 
-        {/* Live Simulated SMS Notification Banner */}
-        {showSimulatedSms && activeOtp && (
+        {/* Live Real SMS / Dispatcher Notification Banner */}
+        {showSimulatedSms && (
           <div
             style={{
               background: '#EFF6FF',
@@ -265,10 +265,10 @@ export const OTPVerificationModal: React.FC<OTPVerificationModalProps> = ({
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <div
                 style={{
-                  width: '32px',
-                  height: '32px',
+                  width: '34px',
+                  height: '34px',
                   borderRadius: '10px',
-                  background: '#2563EB',
+                  background: 'linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)',
                   color: '#FFFFFF',
                   display: 'flex',
                   alignItems: 'center',
@@ -279,36 +279,43 @@ export const OTPVerificationModal: React.FC<OTPVerificationModalProps> = ({
                 <MessageSquare size={16} />
               </div>
               <div>
-                <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#1E40AF', textTransform: 'uppercase' }}>
-                  📲 SMS Dispatcher
+                <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#1E40AF', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span>📲 Real SMS via Google Gateway</span>
+                  <span style={{ fontSize: '0.65rem', background: '#DBEAFE', color: '#1E40AF', padding: '1px 5px', borderRadius: '4px' }}>Active</span>
                 </div>
-                <div style={{ fontSize: '0.82rem', color: '#1E293B', fontWeight: 700 }}>
-                  OTP Code: <span style={{ letterSpacing: '2px', color: '#2563EB', fontWeight: 800 }}>{activeOtp}</span>
+                <div style={{ fontSize: '0.8rem', color: '#1E293B', fontWeight: 600, marginTop: '2px' }}>
+                  {activeOtp ? (
+                    <>Test Code: <span style={{ letterSpacing: '2px', color: '#2563EB', fontWeight: 800 }}>{activeOtp}</span></>
+                  ) : (
+                    <>Check your phone SMS inbox on <strong>+91 {mobileNumber}</strong></>
+                  )}
                 </div>
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={handleAutofill}
-              style={{
-                background: '#2563EB',
-                color: '#FFFFFF',
-                border: 'none',
-                borderRadius: '8px',
-                padding: '6px 10px',
-                fontSize: '0.75rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                flexShrink: 0,
-              }}
-            >
-              <Sparkles size={12} />
-              <span>Autofill</span>
-            </button>
+            {activeOtp && (
+              <button
+                type="button"
+                onClick={handleAutofill}
+                style={{
+                  background: '#2563EB',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '6px 10px',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  flexShrink: 0,
+                }}
+              >
+                <Sparkles size={12} />
+                <span>Autofill</span>
+              </button>
+            )}
           </div>
         )}
 
