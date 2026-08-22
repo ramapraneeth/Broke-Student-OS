@@ -275,7 +275,30 @@ export const LoginScreen: React.FC = () => {
             <span>Reset Password</span>
           </Link>
         </div>
+
+        {/* Dedicated Guardian / Family Safety Portal Link */}
+        <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid #F1F5F9', textAlign: 'center' }}>
+          <Link
+            to="/admin-login"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              color: '#2563EB',
+              fontSize: '0.82rem',
+              fontWeight: 700,
+              textDecoration: 'none',
+              padding: '6px 12px',
+              borderRadius: '8px',
+              background: '#EFF6FF',
+            }}
+          >
+            <ShieldCheck size={16} />
+            <span>Guardian & Family Safety Hub →</span>
+          </Link>
+        </div>
       </div>
     </div>
   );
 };
+

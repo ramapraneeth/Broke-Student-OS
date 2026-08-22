@@ -149,3 +149,40 @@ export type AppScreen =
   | 'hostel-expenses'
   | 'monthly-report'
   | 'admin';
+
+export type NotificationType = 
+  | 'custom_threshold'
+  | 'budget_80'
+  | 'budget_90'
+  | 'overspent'
+  | 'prediction'
+  | 'high_daily'
+  | 'split_bill'
+  | 'hostel_expense'
+  | 'saving_tip'
+  | 'system';
+
+export interface AppNotification {
+  id: string;
+  userId: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  createdAt: string;
+  read: boolean;
+  eventKey: string;
+  monthlyCycle: string;
+}
+
+export interface NotificationSettings {
+  browserNotifications: boolean;
+  budgetAlerts: boolean;
+  customThresholdEnabled: boolean;
+  customThresholdAmount: number;
+  spendingAlerts: boolean;
+  predictionAlerts: boolean;
+  splitBillAlerts: boolean;
+  hostelAlerts: boolean;
+  savingTips: boolean;
+}
+

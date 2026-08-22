@@ -2,6 +2,7 @@ import React from 'react';
 import { useFinance } from '../../context/FinanceContext';
 import { Header } from '../common/Header';
 import { DonutChart } from '../common/DonutChart';
+import { NotificationPermissionBanner } from '../common/NotificationPermissionBanner';
 import { useNavigate } from 'react-router-dom';
 import { 
   PiggyBank, 
@@ -24,6 +25,9 @@ export const HomeScreen: React.FC = () => {
       <Header />
 
       <div className="main-content">
+        {/* Permission UX Banner (opt-in, dismissible) */}
+        <NotificationPermissionBanner />
+
         {/* Greeting Section */}
         <div>
           <h2 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#0F172A', letterSpacing: '-0.02em' }}>
@@ -33,6 +37,7 @@ export const HomeScreen: React.FC = () => {
             Let's make your money last.
           </p>
         </div>
+
 
         {/* Monthly Budget Card */}
         <div

@@ -14,6 +14,7 @@ import { SplitBillScreen } from './components/screens/SplitBillScreen';
 import { HostelExpensesScreen } from './components/screens/HostelExpensesScreen';
 import { MonthlyReportScreen } from './components/screens/MonthlyReportScreen';
 import { AdminScreen } from './components/screens/AdminScreen';
+import { AdminLoginScreen } from './components/screens/AdminLoginScreen';
 import { LayoutDashboard, Receipt, PiggyBank, BarChart3, PlusCircle } from 'lucide-react';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRole?: 'student' | 'parent' }> = ({ children, allowedRole }) => {
@@ -34,7 +35,7 @@ const NavigationShell: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useFinance();
 
-  const isAuthPage = ['/login', '/signup', '/forgot-password', '/setup', '/admin'].includes(location.pathname);
+  const isAuthPage = ['/login', '/signup', '/forgot-password', '/setup', '/admin', '/admin-login'].includes(location.pathname);
   const showBottomNav = user?.isLoggedIn && user.role === 'student' && !isAuthPage;
 
   return (
@@ -45,6 +46,7 @@ const NavigationShell: React.FC = () => {
       <Routes>
         {/* Auth Routes */}
         <Route path="/login" element={<LoginScreen />} />
+        <Route path="/admin-login" element={<AdminLoginScreen />} />
         <Route path="/signup" element={<SignupScreen />} />
         <Route path="/forgot-password" element={<ForgotPasswordScreen />} />
 

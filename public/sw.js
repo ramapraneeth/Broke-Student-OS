@@ -41,3 +41,59 @@ self.addEventListener('fetch', event => {
     })
   );
 });
+
+// Real Web Push Event Handler
+self.addEventListener('push', event => {
+  let data = { title: '🔔 Broke OS', message: 'Smart budget update available.', url: '/' };
+  try {
+    if (event.data) {
+      data = event.data.json();
+    }
+  } catch (e) {
+    if (event.data) {
+      data.message = event.data.text();
+    }
+  }
+
+  const options = {
+    body: data.message || data.body,
+    icon: '/pwa-192x192.svg',
+    badge: '/favicon.svg',
+    vibrate: [100, 50, 100],
+    data: {
+      url: data.url || '/',
+      dateOfArrival: Date.now(),
+    },
+    actions: [
+      { action: 'open', title: 'Open Broke OS' },
+      { action: 'close', title: 'Dismiss' }
+    ]
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(data.title || '🔔 Broke OS', options)
+  );
+});
+
+// Notification Click Handler (focus or open window)
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+
+  if (event.action === 'close') {
+    return;
+  }
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
+      for (const client of clientList) {
+        if (client.url && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow('/');
+      }
+    })
+  );
+});
+

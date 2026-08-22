@@ -116,8 +116,52 @@ async function initDB() {
       );
     `);
 
+    // Create Notifications Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        read BOOLEAN DEFAULT FALSE,
+        event_key TEXT NOT NULL,
+        monthly_cycle TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    // Create Notification Settings Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS notification_settings (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        browser_notifications BOOLEAN DEFAULT TRUE,
+        budget_alerts BOOLEAN DEFAULT TRUE,
+        custom_threshold_enabled BOOLEAN DEFAULT FALSE,
+        custom_threshold_amount NUMERIC DEFAULT 700,
+        spending_alerts BOOLEAN DEFAULT TRUE,
+        prediction_alerts BOOLEAN DEFAULT TRUE,
+        split_bill_alerts BOOLEAN DEFAULT TRUE,
+        hostel_alerts BOOLEAN DEFAULT TRUE,
+        saving_tips BOOLEAN DEFAULT TRUE,
+        dispatched_keys JSONB DEFAULT '[]'::jsonb,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    // Create Push Subscriptions Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        subscription JSONB NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(user_id)
+      );
+    `);
+
     client.release();
-    console.log('✅ Neon PostgreSQL Database Tables Initialized with Parent-Child Role Support');
+    console.log('✅ Neon PostgreSQL Database Tables Initialized with Notifications Support');
   } catch (err) {
     console.error('❌ Failed to initialize database tables:', err);
   }
@@ -511,7 +555,241 @@ app.delete('/api/hostel-expenses/:id', async (req, res) => {
   }
 });
 
+// === NOTIFICATION ROUTES ===
+
+// Get all notifications and settings for user
+app.get('/api/notifications/:userId', async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const notifsResult = await pool.query(
+      'SELECT id, user_id as "userId", type, title, message, read, event_key as "eventKey", monthly_cycle as "monthlyCycle", created_at as "createdAt" FROM notifications WHERE user_id = $1 ORDER BY created_at DESC',
+      [userId]
+    );
+
+    const settingsResult = await pool.query(
+      'SELECT * FROM notification_settings WHERE user_id = $1',
+      [userId]
+    );
+
+    let settings = {
+      browserNotifications: true,
+      budgetAlerts: true,
+      customThresholdEnabled: false,
+      customThresholdAmount: 700,
+      spendingAlerts: true,
+      predictionAlerts: true,
+      splitBillAlerts: true,
+      hostelAlerts: true,
+      savingTips: true,
+      dispatchedKeys: [],
+    };
+
+    if (settingsResult.rows.length > 0) {
+      const row = settingsResult.rows[0];
+      settings = {
+        browserNotifications: row.browser_notifications ?? true,
+        budgetAlerts: row.budget_alerts ?? true,
+        customThresholdEnabled: row.custom_threshold_enabled ?? false,
+        customThresholdAmount: parseFloat(row.custom_threshold_amount || 700),
+        spendingAlerts: row.spending_alerts ?? true,
+        predictionAlerts: row.prediction_alerts ?? true,
+        splitBillAlerts: row.split_bill_alerts ?? true,
+        hostelAlerts: row.hostel_alerts ?? true,
+        savingTips: row.saving_tips ?? true,
+        dispatchedKeys: row.dispatched_keys || [],
+      };
+    }
+
+    res.json({
+      notifications: notifsResult.rows,
+      settings,
+    });
+  } catch (err) {
+    console.error('Fetch notifications error:', err);
+    res.status(500).json({ error: 'Failed to fetch notifications' });
+  }
+});
+
+// Create / Dispatch a notification with strict duplicate eventKey prevention
+app.post('/api/notifications', async (req, res) => {
+  const { userId, type, title, message, eventKey, monthlyCycle } = req.body;
+  if (!userId || !title || !message || !eventKey) {
+    return res.status(400).json({ error: 'Missing required notification fields' });
+  }
+
+  try {
+    // Check if eventKey already exists in notifications table
+    const existing = await pool.query(
+      'SELECT id, user_id as "userId", type, title, message, read, event_key as "eventKey", monthly_cycle as "monthlyCycle", created_at as "createdAt" FROM notifications WHERE user_id = $1 AND event_key = $2',
+      [userId, eventKey]
+    );
+
+    if (existing.rows.length > 0) {
+      return res.json({
+        duplicate: true,
+        message: 'Notification with this eventKey already dispatched',
+        notification: existing.rows[0],
+      });
+    }
+
+    const id = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const result = await pool.query(
+      'INSERT INTO notifications (id, user_id, type, title, message, read, event_key, monthly_cycle) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, user_id as "userId", type, title, message, read, event_key as "eventKey", monthly_cycle as "monthlyCycle", created_at as "createdAt"',
+      [id, userId, type, title, message, false, eventKey, monthlyCycle || '2026-08']
+    );
+
+    // Update dispatched_keys in notification_settings
+    await pool.query(`
+      INSERT INTO notification_settings (user_id, dispatched_keys)
+      VALUES ($1, jsonb_build_array($2::text))
+      ON CONFLICT (user_id)
+      DO UPDATE SET dispatched_keys = (
+        CASE 
+          WHEN notification_settings.dispatched_keys ? $2 THEN notification_settings.dispatched_keys
+          ELSE notification_settings.dispatched_keys || jsonb_build_array($2::text)
+        END
+      ),
+      updated_at = NOW()
+    `, [userId, eventKey]);
+
+    res.json({
+      success: true,
+      duplicate: false,
+      notification: result.rows[0],
+    });
+  } catch (err) {
+    console.error('Create notification error:', err);
+    res.status(500).json({ error: 'Failed to record notification' });
+  }
+});
+
+// Mark single notification as read
+app.put('/api/notifications/:id/read', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query('UPDATE notifications SET read = TRUE WHERE id = $1', [id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Mark read error:', err);
+    res.status(500).json({ error: 'Failed to mark notification as read' });
+  }
+});
+
+// Mark all notifications as read for user
+app.put('/api/notifications/read-all/:userId', async (req, res) => {
+  const { userId } = req.params;
+  try {
+    await pool.query('UPDATE notifications SET read = TRUE WHERE user_id = $1', [userId]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Mark all read error:', err);
+    res.status(500).json({ error: 'Failed to mark all as read' });
+  }
+});
+
+// Clear/Delete all notifications for user
+app.delete('/api/notifications/:userId', async (req, res) => {
+  const { userId } = req.params;
+  try {
+    await pool.query('DELETE FROM notifications WHERE user_id = $1', [userId]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Clear notifications error:', err);
+    res.status(500).json({ error: 'Failed to clear notifications' });
+  }
+});
+
+// Save notification settings
+app.post('/api/notifications/settings', async (req, res) => {
+  const { 
+    userId, 
+    browserNotifications, 
+    budgetAlerts, 
+    customThresholdEnabled, 
+    customThresholdAmount, 
+    spendingAlerts, 
+    predictionAlerts, 
+    splitBillAlerts, 
+    hostelAlerts, 
+    savingTips 
+  } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ error: 'User ID is required' });
+  }
+
+  try {
+    await pool.query(`
+      INSERT INTO notification_settings (
+        user_id, 
+        browser_notifications, 
+        budget_alerts, 
+        custom_threshold_enabled, 
+        custom_threshold_amount, 
+        spending_alerts, 
+        prediction_alerts, 
+        split_bill_alerts, 
+        hostel_alerts, 
+        saving_tips,
+        updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+      ON CONFLICT (user_id)
+      DO UPDATE SET 
+        browser_notifications = EXCLUDED.browser_notifications,
+        budget_alerts = EXCLUDED.budget_alerts,
+        custom_threshold_enabled = EXCLUDED.custom_threshold_enabled,
+        custom_threshold_amount = EXCLUDED.custom_threshold_amount,
+        spending_alerts = EXCLUDED.spending_alerts,
+        prediction_alerts = EXCLUDED.prediction_alerts,
+        split_bill_alerts = EXCLUDED.split_bill_alerts,
+        hostel_alerts = EXCLUDED.hostel_alerts,
+        saving_tips = EXCLUDED.saving_tips,
+        updated_at = NOW()
+    `, [
+      userId,
+      browserNotifications ?? true,
+      budgetAlerts ?? true,
+      customThresholdEnabled ?? false,
+      customThresholdAmount ?? 700,
+      spendingAlerts ?? true,
+      predictionAlerts ?? true,
+      splitBillAlerts ?? true,
+      hostelAlerts ?? true,
+      savingTips ?? true,
+    ]);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Save notification settings error:', err);
+    res.status(500).json({ error: 'Failed to save notification settings' });
+  }
+});
+
+// Save Web Push Subscription
+app.post('/api/notifications/subscribe', async (req, res) => {
+  const { userId, subscription } = req.body;
+  if (!userId || !subscription) {
+    return res.status(400).json({ error: 'User ID and subscription required' });
+  }
+
+  try {
+    const id = `sub_${Date.now()}`;
+    await pool.query(`
+      INSERT INTO push_subscriptions (id, user_id, subscription)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (user_id)
+      DO UPDATE SET subscription = EXCLUDED.subscription, created_at = NOW()
+    `, [id, userId, JSON.stringify(subscription)]);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Save push subscription error:', err);
+    res.status(500).json({ error: 'Failed to save push subscription' });
+  }
+});
+
 // Start Server
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Broke OS Neon Backend running at http://0.0.0.0:${PORT}`);
 });
+

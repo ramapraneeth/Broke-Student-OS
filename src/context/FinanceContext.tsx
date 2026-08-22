@@ -5,9 +5,19 @@ import {
   HostelExpense, 
   UserProfile, 
   FinancialMetrics,
-  LinkedChild 
+  LinkedChild,
+  AppNotification,
+  NotificationSettings,
+  NotificationType
 } from '../types';
 import { calculateFinancialMetrics } from '../utils/calculations';
+import { 
+  DEFAULT_NOTIFICATION_SETTINGS, 
+  getNotificationPermission, 
+  requestBrowserNotificationPermission, 
+  sendBrowserNotification,
+  evaluateAndTriggerAlerts
+} from '../utils/notificationManager';
 
 interface FinanceContextType {
   user: UserProfile | null;
@@ -18,6 +28,20 @@ interface FinanceContextType {
   hostelExpenses: HostelExpense[];
   metrics: FinancialMetrics;
   isLoading: boolean;
+  
+  // Notification State
+  notifications: AppNotification[];
+  notificationSettings: NotificationSettings;
+  unreadNotificationCount: number;
+  permissionStatus: NotificationPermission | 'unsupported';
+  requestPermission: () => Promise<{ status: NotificationPermission | 'unsupported'; message: string }>;
+  updateNotificationSettings: (settings: Partial<NotificationSettings>) => Promise<void>;
+  markNotificationAsRead: (id: string) => Promise<void>;
+  markAllNotificationsAsRead: () => Promise<void>;
+  clearAllNotifications: () => Promise<void>;
+  sendTestNotification: (type?: NotificationType) => Promise<void>;
+  dismissBanner: () => void;
+  showNotificationBanner: boolean;
   
   // Parent / Admin state
   linkedChildren: LinkedChild[];
@@ -50,6 +74,7 @@ interface FinanceContextType {
   unlinkChild: (childMobile: string) => Promise<void>;
 }
 
+
 const STORAGE_AUTH_KEY = 'broke_os_auth_user';
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
@@ -71,6 +96,20 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [hostelExpenses, setHostelExpenses] = useState<HostelExpense[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
+  // Notification State
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>(() => {
+    try {
+      const saved = localStorage.getItem('broke_os_notif_settings');
+      return saved ? JSON.parse(saved) : DEFAULT_NOTIFICATION_SETTINGS;
+    } catch {
+      return DEFAULT_NOTIFICATION_SETTINGS;
+    }
+  });
+  const [permissionStatus, setPermissionStatus] = useState<NotificationPermission | 'unsupported'>(() => getNotificationPermission());
+  const [showNotificationBanner, setShowNotificationBanner] = useState<boolean>(false);
+  const dispatchedKeysRef = React.useRef<Set<string>>(new Set());
+
   // Parent State
   const [linkedChildren, setLinkedChildren] = useState<LinkedChild[]>([]);
   const [selectedChild, setSelectedChild] = useState<LinkedChild | null>(null);
@@ -87,6 +126,59 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       localStorage.removeItem(STORAGE_AUTH_KEY);
     }
   }, [user]);
+
+  // Sync settings to localStorage
+  useEffect(() => {
+    localStorage.setItem('broke_os_notif_settings', JSON.stringify(notificationSettings));
+  }, [notificationSettings]);
+
+  // Check banner display on mount / login
+  useEffect(() => {
+    if (user && user.isLoggedIn && user.role === 'student') {
+      const currentPerm = getNotificationPermission();
+      setPermissionStatus(currentPerm);
+      const isDismissed = sessionStorage.getItem('broke_os_notif_banner_dismissed') === 'true';
+      if (currentPerm === 'default' && !isDismissed) {
+        setShowNotificationBanner(true);
+      } else {
+        setShowNotificationBanner(false);
+      }
+    } else {
+      setShowNotificationBanner(false);
+    }
+  }, [user]);
+
+  const dismissBanner = () => {
+    sessionStorage.setItem('broke_os_notif_banner_dismissed', 'true');
+    setShowNotificationBanner(false);
+  };
+
+  // Fetch Notifications & Settings from backend
+  const fetchNotifications = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const res = await fetch(`/api/notifications/${user.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setNotifications(data.notifications || []);
+        if (data.settings) {
+          setNotificationSettings(prev => ({
+            ...prev,
+            ...data.settings,
+          }));
+          if (Array.isArray(data.settings.dispatchedKeys)) {
+            data.settings.dispatchedKeys.forEach((k: string) => dispatchedKeysRef.current.add(k));
+          }
+        }
+        if (Array.isArray(data.notifications)) {
+          data.notifications.forEach((n: AppNotification) => dispatchedKeysRef.current.add(n.eventKey));
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load notifications from backend:', err);
+    }
+  }, [user?.id]);
+
 
   // Fetch all user data from Neon PostgreSQL database
   const refreshData = useCallback(async () => {
@@ -119,14 +211,12 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (res.ok) {
         const data = await res.json();
         setLinkedChildren(data.children || []);
-        if (data.children?.length > 0 && !selectedChild) {
-          setSelectedChild(data.children[0]);
-        }
       }
     } catch (err) {
       console.error('Failed to fetch linked children:', err);
     }
-  }, [user?.id, user?.role, selectedChild]);
+  }, [user?.id, user?.role]);
+
 
   // Parent: Fetch selected child data
   const fetchSelectedChildData = useCallback(async () => {
@@ -428,6 +518,176 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
+  // Fetch notifications on user load
+  useEffect(() => {
+    if (user?.id && user.role === 'student') {
+      fetchNotifications();
+    }
+  }, [user?.id, user?.role, fetchNotifications]);
+
+  // Handle dispatching in-app notification to DB & state
+  const handleDispatchNotification = useCallback(async (notifData: {
+    type: AppNotification['type'];
+    title: string;
+    message: string;
+    eventKey: string;
+    monthlyCycle: string;
+  }) => {
+    if (!user?.id) return;
+    try {
+      const res = await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          ...notifData,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.notification) {
+          setNotifications(prev => [data.notification, ...prev.filter(n => n.id !== data.notification.id)]);
+        }
+      }
+    } catch (err) {
+      console.error('Dispatch notification error:', err);
+    }
+  }, [user?.id]);
+
+  // Evaluate and trigger financial alerts whenever data updates
+  useEffect(() => {
+    if (!user || user.role !== 'student' || !user.isLoggedIn || isLoading) return;
+
+    evaluateAndTriggerAlerts({
+      user,
+      metrics,
+      monthlyBudget,
+      monthYear,
+      expenses,
+      splitBills,
+      hostelExpenses,
+      settings: notificationSettings,
+      dispatchedKeys: dispatchedKeysRef.current,
+      onDispatchNotification: handleDispatchNotification,
+    });
+  }, [
+    user,
+    metrics,
+    monthlyBudget,
+    monthYear,
+    expenses,
+    splitBills,
+    hostelExpenses,
+    notificationSettings,
+    isLoading,
+    handleDispatchNotification,
+  ]);
+
+  const requestPermission = async (): Promise<{ status: NotificationPermission | 'unsupported'; message: string }> => {
+    const res = await requestBrowserNotificationPermission();
+    setPermissionStatus(res.status);
+    if (res.status === 'granted') {
+      setShowNotificationBanner(false);
+      await updateNotificationSettings({ browserNotifications: true });
+    }
+    return res;
+  };
+
+  const updateNotificationSettings = async (updated: Partial<NotificationSettings>) => {
+    const newSettings = { ...notificationSettings, ...updated };
+    setNotificationSettings(newSettings);
+    if (user?.id) {
+      try {
+        await fetch('/api/notifications/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: user.id, ...newSettings }),
+        });
+      } catch (err) {
+        console.error('Failed to save settings to server:', err);
+      }
+    }
+  };
+
+  const markNotificationAsRead = async (id: string) => {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    try {
+      await fetch(`/api/notifications/${id}/read`, { method: 'PUT' });
+    } catch (err) {
+      console.error('Failed to mark read:', err);
+    }
+  };
+
+  const markAllNotificationsAsRead = async () => {
+    if (!user?.id) return;
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    try {
+      await fetch(`/api/notifications/read-all/${user.id}`, { method: 'PUT' });
+    } catch (err) {
+      console.error('Failed to mark all read:', err);
+    }
+  };
+
+  const clearAllNotifications = async () => {
+    if (!user?.id) return;
+    setNotifications([]);
+    try {
+      await fetch(`/api/notifications/${user.id}`, { method: 'DELETE' });
+    } catch (err) {
+      console.error('Failed to clear notifications:', err);
+    }
+  };
+
+  const sendTestNotification = async (type: NotificationType = 'budget_80') => {
+    if (!user) return;
+    let title = '🔔 Broke OS';
+    let message = 'Test alert: You will receive real-time updates on your budget.';
+    
+    if (type === 'custom_threshold') {
+      title = '⚠️ Broke OS';
+      message = `You've spent ₹${(notificationSettings.customThresholdAmount || 700).toLocaleString('en-IN')} of your ₹${monthlyBudget.toLocaleString('en-IN')} monthly budget.`;
+    } else if (type === 'budget_80') {
+      title = '🔔 Broke OS';
+      message = `You've used 80% of your monthly budget. ₹${Math.floor(monthlyBudget * 0.8).toLocaleString('en-IN')} / ₹${monthlyBudget.toLocaleString('en-IN')} spent.`;
+    } else if (type === 'budget_90') {
+      title = '🚨 Broke OS';
+      message = `Only ₹${Math.floor(monthlyBudget * 0.1).toLocaleString('en-IN')} remains from your monthly budget.`;
+    } else if (type === 'overspent') {
+      title = '🚨 Broke OS';
+      message = 'You\'ve exceeded your monthly budget by ₹200.';
+    } else if (type === 'prediction') {
+      title = '🔮 Broke OS';
+      message = 'At your current spending rate, you may exceed your monthly budget.';
+    } else if (type === 'high_daily') {
+      title = '⚠️ Broke OS';
+      message = 'You spent ₹100 today. Your safe daily limit is ₹32.';
+    } else if (type === 'split_bill') {
+      title = '👥 Broke OS';
+      message = 'Rahul owes you ₹200 from a split bill.';
+    } else if (type === 'hostel_expense') {
+      title = '🏠 Broke OS';
+      message = 'Your share of the hostel WiFi bill is ₹150.';
+    }
+
+    const eventKey = `test_${type}_${Date.now()}`;
+    
+    // Browser notification
+    if (notificationSettings.browserNotifications && getNotificationPermission() === 'granted') {
+      sendBrowserNotification(title, message, eventKey);
+    }
+
+    // In-app notification
+    await handleDispatchNotification({
+      type,
+      title,
+      message,
+      eventKey,
+      monthlyCycle: monthYear,
+    });
+  };
+
+  const unreadNotificationCount = notifications.filter(n => !n.read).length;
+
   const deleteHostelExpense = async (id: string) => {
     try {
       const res = await fetch(`/api/hostel-expenses/${id}`, {
@@ -452,6 +712,18 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         hostelExpenses,
         metrics,
         isLoading,
+        notifications,
+        notificationSettings,
+        unreadNotificationCount,
+        permissionStatus,
+        requestPermission,
+        updateNotificationSettings,
+        markNotificationAsRead,
+        markAllNotificationsAsRead,
+        clearAllNotifications,
+        sendTestNotification,
+        dismissBanner,
+        showNotificationBanner,
         linkedChildren,
         selectedChild,
         childBudget,
@@ -483,6 +755,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     </FinanceContext.Provider>
   );
 };
+
 
 export const useFinance = () => {
   const context = useContext(FinanceContext);

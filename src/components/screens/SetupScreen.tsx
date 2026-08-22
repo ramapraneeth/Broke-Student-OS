@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { useFinance } from '../../context/FinanceContext';
 import { Header } from '../common/Header';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, ArrowRight, Wallet, User as UserIcon } from 'lucide-react';
+import { Sparkles, ArrowRight, Wallet, User as UserIcon, Bell } from 'lucide-react';
+import { NotificationSettingsModal } from './NotificationSettingsModal';
 
 export const SetupScreen: React.FC = () => {
   const { user, monthlyBudget, updateBudget } = useFinance();
@@ -13,6 +14,8 @@ export const SetupScreen: React.FC = () => {
   const [errorName, setErrorName] = useState('');
   const [errorBudget, setErrorBudget] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isNotifSettingsOpen, setIsNotifSettingsOpen] = useState(false);
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -184,12 +187,56 @@ export const SetupScreen: React.FC = () => {
                 <span>Saving to Neon DB...</span>
               ) : (
                 <>
-                  <span>CONTINUE</span>
+                  <span>SAVE & CONTINUE</span>
                   <ArrowRight size={18} />
                 </>
               )}
             </button>
           </form>
+        </div>
+
+        {/* Profile → Notification Settings Section */}
+        <div
+          className="white-card"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '16px 20px',
+            border: '1.5px solid #C7D2FE',
+            background: '#F8FAFC',
+            cursor: 'pointer',
+          }}
+          onClick={() => setIsNotifSettingsOpen(true)}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div
+              style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '12px',
+                background: '#EEF2FF',
+                color: '#4F46E5',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Bell size={20} />
+            </div>
+            <div>
+              <h4 style={{ fontSize: '0.95rem', fontWeight: 800, color: '#0F172A', margin: 0 }}>
+                Notification Settings
+              </h4>
+              <p style={{ fontSize: '0.75rem', color: '#64748B', margin: '2px 0 0 0' }}>
+                Browser push alerts, 80%/90% limits, ₹700 alert
+              </p>
+            </div>
+          </div>
+
+          <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#4F46E5' }}>
+            Configure →
+          </span>
         </div>
 
         {/* Why Broke OS Info */}
@@ -212,6 +259,13 @@ export const SetupScreen: React.FC = () => {
           </p>
         </div>
       </div>
+
+      {/* Notification Settings Modal */}
+      <NotificationSettingsModal
+        isOpen={isNotifSettingsOpen}
+        onClose={() => setIsNotifSettingsOpen(false)}
+      />
     </div>
   );
 };
+
