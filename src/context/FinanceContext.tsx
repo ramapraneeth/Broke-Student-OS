@@ -367,19 +367,18 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           success: true, 
           isRealSms: true, 
           message: `Official verification code sent via Real SMS to +91 ${mobile}`,
-          otp: data.otp // fallback test code
+          otp: undefined // Hide test code so user enters real SMS code
         };
       } else {
-        console.warn('Firebase SMS failed, falling back to simulated SMS:', firebaseRes.error);
+        console.error('Firebase SMS failed:', firebaseRes.error);
         return { 
-          success: true, 
+          success: false, 
           isRealSms: false,
-          otp: data.otp, 
-          message: data.message 
+          error: firebaseRes.error || 'Failed to send real SMS verification code.' 
         };
       }
-    } catch (err) {
-      return { success: false, error: 'Network error sending verification code' };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Network error sending verification code' };
     }
   };
 

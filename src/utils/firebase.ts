@@ -91,7 +91,11 @@ export const sendRealSmsOtp = async (
     // Format phone number with country code (+91 for India)
     const formattedPhoneNumber = `+91${cleanDigits}`;
 
+    // Set auth language for SMS
+    firebaseAuth.languageCode = 'en';
+
     const verifier = initRecaptchaVerifier(containerId);
+    await verifier.render();
     
     console.log(`📡 [Firebase Real SMS] Dispatching Google Telecom SMS to ${formattedPhoneNumber}...`);
     const confirmationResult = await signInWithPhoneNumber(firebaseAuth, formattedPhoneNumber, verifier);
