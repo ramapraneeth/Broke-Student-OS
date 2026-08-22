@@ -246,6 +246,21 @@ app.post('/api/auth/send-otp', async (req, res) => {
       VALUES ($1, $2, $3, $4, NOW() + INTERVAL '5 minutes')
     `, [otpId, cleanMobile, otpCode, reason || 'general']);
 
+    // Attempt real SMS delivery via Fast2SMS
+    const FAST2SMS_API_KEY = process.env.FAST2SMS_API_KEY || "xsGEzy48CIZH0AWSQJ3RkVfDpM6tnUwbP72vea9XjTlgFhiOr5l9N4utRcIDzVU5ZKFhrk7PW1EYn6HJ";
+    try {
+      fetch(`https://www.fast2sms.com/dev/bulkV2?authorization=${FAST2SMS_API_KEY}&variables_values=${otpCode}&route=otp&numbers=${cleanMobile}`)
+        .then(r => r.json())
+        .then(d => {
+          if (d?.return) {
+            console.log(`✅ [Fast2SMS] Real carrier SMS successfully sent to +91 ${cleanMobile}!`);
+          } else {
+            console.log(`ℹ️ [Fast2SMS Note]:`, d?.message || d);
+          }
+        })
+        .catch(e => console.error('Fast2SMS Network Error:', e.message));
+    } catch (e) {}
+
     console.log(`📲 [SMS Dispatcher] OTP for ${cleanMobile} (${reason}): [ ${otpCode} ]`);
 
     res.json({

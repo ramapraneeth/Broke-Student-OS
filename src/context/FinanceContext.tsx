@@ -18,7 +18,6 @@ import {
   sendBrowserNotification,
   evaluateAndTriggerAlerts
 } from '../utils/notificationManager';
-import { sendRealSmsOtp, verifyRealSmsOtp } from '../utils/firebase';
 
 interface FinanceContextType {
   user: UserProfile | null;
@@ -58,8 +57,6 @@ interface FinanceContextType {
   login: (mobile: string, pass: string, role?: 'student' | 'parent') => Promise<{ success: boolean; role?: 'student' | 'parent'; error?: string }>;
   signup: (name: string, mobile: string, pass: string, role?: 'student' | 'parent') => Promise<{ success: boolean; error?: string }>;
   resetPassword: (mobile: string, newPass: string) => Promise<{ success: boolean; error?: string }>;
-  sendOtp: (mobile: string, reason: 'login' | 'signup' | 'link_child', role?: 'student' | 'parent') => Promise<{ success: boolean; otp?: string; message?: string; error?: string }>;
-  verifyOtp: (mobile: string, otp: string, reason: 'login' | 'signup' | 'link_child') => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   updateBudget: (name: string, amount: number) => Promise<void>;
   addExpense: (expense: Omit<Expense, 'id' | 'createdAt'>) => Promise<void>;
@@ -73,7 +70,7 @@ interface FinanceContextType {
   
   // Parent actions
   fetchLinkedChildren: () => Promise<void>;
-  linkChild: (childMobile: string, otp?: string) => Promise<{ success: boolean; student?: LinkedChild; error?: string }>;
+  linkChild: (childMobile: string) => Promise<{ success: boolean; student?: LinkedChild; error?: string }>;
   unlinkChild: (childMobile: string) => Promise<void>;
 }
 
@@ -347,81 +344,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     localStorage.removeItem(STORAGE_AUTH_KEY);
   };
 
-  const sendOtp = async (mobile: string, reason: 'login' | 'signup' | 'link_child', role?: 'student' | 'parent'): Promise<{ success: boolean; otp?: string; message?: string; isRealSms?: boolean; error?: string }> => {
-    try {
-      // 1. Validate on backend first
-      const res = await fetch('/api/auth/send-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mobileNumber: mobile, reason, role }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        return { success: false, error: data.error || 'Failed to send verification code' };
-      }
-
-      // 2. Dispatch real carrier SMS via Firebase Phone Auth
-      const firebaseRes = await sendRealSmsOtp(mobile, 'recaptcha-container');
-      if (firebaseRes.success) {
-        return { 
-          success: true, 
-          isRealSms: true, 
-          message: `Official verification code sent via Real SMS to +91 ${mobile}`,
-          otp: undefined // Hide test code so user enters real SMS code
-        };
-      } else {
-        console.error('Firebase SMS failed:', firebaseRes.error);
-        return { 
-          success: false, 
-          isRealSms: false,
-          error: firebaseRes.error || 'Failed to send real SMS verification code.' 
-        };
-      }
-    } catch (err: any) {
-      return { success: false, error: err?.message || 'Network error sending verification code' };
-    }
-  };
-
-  const verifyOtp = async (mobile: string, otp: string, reason: 'login' | 'signup' | 'link_child'): Promise<{ success: boolean; error?: string }> => {
-    try {
-      // 1. Try Firebase real SMS confirmation first
-      const firebaseVerify = await verifyRealSmsOtp(otp);
-      if (firebaseVerify.success) {
-        // Also notify backend
-        try {
-          await fetch('/api/auth/verify-otp', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ mobileNumber: mobile, otp, reason }),
-          });
-        } catch (e) {}
-        return { success: true };
-      }
-
-      // 2. Fallback to backend DB verification
-      const res = await fetch('/api/auth/verify-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mobileNumber: mobile, otp, reason }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        return { success: false, error: firebaseVerify.error || data.error || 'Invalid verification code' };
-      }
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: 'Network error verifying code' };
-    }
-  };
-
-  // Parent: Link a new student child (with OTP support)
-  const linkChild = async (childMobile: string, otp?: string): Promise<{ success: boolean; student?: LinkedChild; error?: string }> => {
+  // Parent: Link a new student child
+  const linkChild = async (childMobile: string): Promise<{ success: boolean; student?: LinkedChild; error?: string }> => {
     if (!user?.id) return { success: false, error: 'Not logged in' };
     try {
       const res = await fetch('/api/parent/link-child', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parentId: user.id, childMobile, otp }),
+        body: JSON.stringify({ parentId: user.id, childMobile }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -806,8 +736,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         login,
         signup,
         resetPassword,
-        sendOtp,
-        verifyOtp,
         logout,
         updateBudget,
         addExpense,

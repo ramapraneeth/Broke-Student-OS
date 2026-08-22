@@ -27,7 +27,6 @@ import {
   ArrowUpRight
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { OTPVerificationModal } from '../common/OTPVerificationModal';
 
 export const AdminScreen: React.FC = () => {
   const { 
@@ -37,7 +36,6 @@ export const AdminScreen: React.FC = () => {
     setSelectedChild, 
     linkChild, 
     unlinkChild, 
-    sendOtp,
     childBudget, 
     childExpenses, 
     childMetrics, 
@@ -50,10 +48,6 @@ export const AdminScreen: React.FC = () => {
   const [isLinking, setIsLinking] = useState(false);
   const [linkMsg, setLinkMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showAddChildModal, setShowAddChildModal] = useState(false);
-
-  // Child Consent OTP Verification
-  const [showChildOtpModal, setShowChildOtpModal] = useState(false);
-  const [childActiveOtp, setChildActiveOtp] = useState('');
 
   // Expense History Filters & Search for Selected Child
   const [searchQuery, setSearchQuery] = useState('');
@@ -70,24 +64,8 @@ export const AdminScreen: React.FC = () => {
 
     setIsLinking(true);
     setLinkMsg(null);
-    // Send consent OTP to the child's mobile number
-    const otpRes = await sendOtp(cleanMobile, 'link_child');
+    const result = await linkChild(cleanMobile);
     setIsLinking(false);
-
-    if (otpRes.success) {
-      setChildActiveOtp(otpRes.otp || '');
-      setShowChildOtpModal(true);
-    } else {
-      setLinkMsg({ type: 'error', text: otpRes.error || 'Could not find student account with this mobile number.' });
-    }
-  };
-
-  const handleChildOtpVerified = async (otpCode: string) => {
-    const cleanMobile = inputMobile.replace(/\D/g, '');
-    setIsLinking(true);
-    const result = await linkChild(cleanMobile, otpCode);
-    setIsLinking(false);
-    setShowChildOtpModal(false);
 
     if (result.success) {
       setLinkMsg({ type: 'success', text: `Successfully linked ${result.student?.name || 'student'}!` });
@@ -1010,17 +988,6 @@ export const AdminScreen: React.FC = () => {
           </div>
         </div>
       )}
-
-      {/* Student Consent OTP Verification Modal */}
-      <OTPVerificationModal
-        isOpen={showChildOtpModal}
-        mobileNumber={inputMobile}
-        reason="link_child"
-        childName="Student"
-        initialOtp={childActiveOtp}
-        onVerified={handleChildOtpVerified}
-        onClose={() => setShowChildOtpModal(false)}
-      />
     </div>
   );
 };
