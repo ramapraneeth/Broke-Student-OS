@@ -25,25 +25,49 @@ let globalConfirmationResult: ConfirmationResult | null = null;
 let recaptchaVerifier: RecaptchaVerifier | null = null;
 
 /**
- * Initialize Invisible reCAPTCHA verifier
+ * Ensure the recaptcha DOM element exists
+ */
+const ensureRecaptchaContainer = (containerId: string = 'recaptcha-container'): HTMLElement => {
+  let el = document.getElementById(containerId);
+  if (!el) {
+    el = document.createElement('div');
+    el.id = containerId;
+    el.style.position = 'fixed';
+    el.style.bottom = '0';
+    el.style.left = '0';
+    el.style.zIndex = '99999';
+    document.body.appendChild(el);
+  }
+  return el;
+};
+
+/**
+ * Initialize Invisible reCAPTCHA verifier safely
  */
 export const initRecaptchaVerifier = (containerId: string = 'recaptcha-container'): RecaptchaVerifier => {
+  ensureRecaptchaContainer(containerId);
+
   if (recaptchaVerifier) {
     try {
       recaptchaVerifier.clear();
     } catch (e) {
       // ignore
     }
+    recaptchaVerifier = null;
   }
 
   recaptchaVerifier = new RecaptchaVerifier(firebaseAuth, containerId, {
     size: 'invisible',
     callback: () => {
-      console.log('✅ reCAPTCHA solved automatically by Google');
+      console.log('✅ Google reCAPTCHA solved automatically');
     },
     'expired-callback': () => {
-      console.warn('⚠️ reCAPTCHA expired, resetting...');
-      if (recaptchaVerifier) recaptchaVerifier.clear();
+      console.warn('⚠️ Google reCAPTCHA expired, resetting...');
+      if (recaptchaVerifier) {
+        try {
+          recaptchaVerifier.clear();
+        } catch (e) {}
+      }
       recaptchaVerifier = null;
     }
   });
@@ -84,15 +108,17 @@ export const sendRealSmsOtp = async (
       recaptchaVerifier = null;
     }
 
-    let userFriendlyError = err.message || 'Failed to send real SMS.';
-    if (err.code === 'auth/invalid-phone-number') {
+    let userFriendlyError = err?.message || 'Firebase SMS service unavailable.';
+    if (err?.code === 'auth/invalid-phone-number') {
       userFriendlyError = 'Invalid phone number format.';
-    } else if (err.code === 'auth/quota-exceeded') {
+    } else if (err?.code === 'auth/quota-exceeded') {
       userFriendlyError = 'SMS quota temporarily exceeded. Please try again later.';
-    } else if (err.code === 'auth/captcha-check-failed') {
+    } else if (err?.code === 'auth/captcha-check-failed') {
       userFriendlyError = 'reCAPTCHA verification failed. Please refresh.';
-    } else if (err.code === 'auth/too-many-requests') {
+    } else if (err?.code === 'auth/too-many-requests') {
       userFriendlyError = 'Too many requests. Please wait a moment.';
+    } else if (err?.code === 'auth/unauthorized-domain') {
+      userFriendlyError = 'Domain not authorized in Firebase Console.';
     }
 
     return { success: false, error: userFriendlyError, isRealSms: false };
@@ -104,7 +130,7 @@ export const sendRealSmsOtp = async (
  */
 export const verifyRealSmsOtp = async (otpCode: string): Promise<{ success: boolean; error?: string }> => {
   if (!globalConfirmationResult) {
-    return { success: false, error: 'No active verification session. Please request a new code.' };
+    return { success: false, error: 'No active Firebase verification session.' };
   }
 
   try {
@@ -113,10 +139,10 @@ export const verifyRealSmsOtp = async (otpCode: string): Promise<{ success: bool
     return { success: true };
   } catch (err: any) {
     console.error('❌ Firebase OTP Confirmation Error:', err);
-    let msg = 'Incorrect verification code. Please check your SMS and try again.';
-    if (err.code === 'auth/invalid-verification-code') {
+    let msg = 'Incorrect verification code. Please check your SMS.';
+    if (err?.code === 'auth/invalid-verification-code') {
       msg = 'Invalid 6-digit code. Please enter the exact code from your SMS.';
-    } else if (err.code === 'auth/code-expired') {
+    } else if (err?.code === 'auth/code-expired') {
       msg = 'Verification code has expired. Please tap Resend Code.';
     }
     return { success: false, error: msg };
