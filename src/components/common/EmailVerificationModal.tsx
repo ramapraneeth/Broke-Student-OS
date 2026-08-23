@@ -229,13 +229,17 @@ export const EmailVerificationModal: React.FC<EmailVerificationModalProps> = ({
           <div
             style={{
               display: 'inline-block',
-              marginTop: '6px',
+              marginTop: '8px',
               padding: '4px 12px',
               background: 'rgba(255, 255, 255, 0.2)',
               borderRadius: '20px',
-              fontSize: '13px',
+              fontSize: '12px',
               fontWeight: 700,
               letterSpacing: '0.2px',
+              maxWidth: '90%',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
             }}
           >
             {email}
@@ -243,7 +247,7 @@ export const EmailVerificationModal: React.FC<EmailVerificationModalProps> = ({
         </div>
 
         {/* Content */}
-        <div style={{ padding: '24px' }}>
+        <div style={{ padding: '24px', boxSizing: 'border-box' }}>
           {/* Live 60-Second Timer Bar */}
           <div
             style={{
@@ -255,6 +259,7 @@ export const EmailVerificationModal: React.FC<EmailVerificationModalProps> = ({
               background: isExpired ? '#FEF2F2' : '#F0FDF4',
               border: `1px solid ${isExpired ? '#FECACA' : '#BBF7D0'}`,
               marginBottom: '20px',
+              boxSizing: 'border-box',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -286,8 +291,10 @@ export const EmailVerificationModal: React.FC<EmailVerificationModalProps> = ({
             style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(6, 1fr)',
-              gap: '8px',
+              gap: '6px',
               marginBottom: '16px',
+              width: '100%',
+              boxSizing: 'border-box',
             }}
             onPaste={handlePaste}
           >
@@ -306,9 +313,15 @@ export const EmailVerificationModal: React.FC<EmailVerificationModalProps> = ({
                 onChange={e => handleDigitChange(idx, e.target.value)}
                 onKeyDown={e => handleKeyDown(idx, e)}
                 style={{
-                  height: '52px',
+                  width: '100%',
+                  minWidth: 0,
+                  maxWidth: '100%',
+                  height: '48px',
+                  boxSizing: 'border-box',
+                  padding: 0,
+                  margin: 0,
                   textAlign: 'center',
-                  fontSize: '22px',
+                  fontSize: '20px',
                   fontWeight: 800,
                   borderRadius: '12px',
                   border: `2px solid ${digit ? '#4F46E5' : isExpired ? '#E2E8F0' : '#CBD5E1'}`,

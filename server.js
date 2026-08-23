@@ -3,6 +3,12 @@ import express from 'express';
 import cors from 'cors';
 import pg from 'pg';
 import nodemailer from 'nodemailer';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const { Pool } = pg;
 const app = express();
@@ -271,9 +277,11 @@ async function initDB() {
       );
     `);
 
-    // Ensure child_email column exists
+    // Ensure child_email column exists and legacy mobile constraints are relaxed
     await client.query(`
       ALTER TABLE parent_child_links ADD COLUMN IF NOT EXISTS child_email TEXT;
+      ALTER TABLE parent_child_links ALTER COLUMN child_mobile DROP NOT NULL;
+      ALTER TABLE users ALTER COLUMN mobile_number DROP NOT NULL;
     `);
 
     // Create Budgets Table
@@ -635,9 +643,32 @@ app.post('/api/auth/forgot-password', async (req, res) => {
 
 // === PARENT & GUARDIAN MONITORING ROUTES ===
 
-// Link Student Child via Student Email
+// Search Student Accounts by Email or Name
+app.get('/api/parent/search-students', async (req, res) => {
+  const query = (req.query.query || '').toString().trim().toLowerCase();
+  if (!query) {
+    return res.json({ students: [] });
+  }
+
+  try {
+    const result = await pool.query(`
+      SELECT id, name, email, is_setup_complete as "isSetupComplete"
+      FROM users
+      WHERE role = 'student' AND (LOWER(email) LIKE $1 OR LOWER(name) LIKE $1)
+      ORDER BY name ASC
+      LIMIT 10
+    `, [`%${query}%`]);
+
+    res.json({ students: result.rows });
+  } catch (err) {
+    console.error('Search students error:', err);
+    res.status(500).json({ error: 'Failed to search student accounts.' });
+  }
+});
+
+// Link Student Child via Student Email (with 1-minute OTP consent)
 app.post('/api/parent/link-child', async (req, res) => {
-  const { parentId, childEmail } = req.body;
+  const { parentId, childEmail, otp } = req.body;
   if (!parentId || !childEmail) {
     return res.status(400).json({ error: 'Parent ID and Student email are required.' });
   }
@@ -653,6 +684,27 @@ app.post('/api/parent/link-child', async (req, res) => {
     const student = studentRes.rows[0];
     if (student.role !== 'student') {
       return res.status(400).json({ error: 'The specified email belongs to a parent account, not a student.' });
+    }
+
+    // If OTP provided, verify it
+    if (otp) {
+      const otpRes = await pool.query(`
+        SELECT * FROM email_verifications
+        WHERE LOWER(email) = $1 AND reason = 'link_child' AND verified = FALSE AND expires_at > NOW()
+        ORDER BY created_at DESC
+        LIMIT 1
+      `, [cleanChildEmail]);
+
+      if (otpRes.rows.length === 0) {
+        return res.status(400).json({ error: 'Student verification code has expired (1-minute limit). Please request a new code.' });
+      }
+
+      if (otpRes.rows[0].otp_code !== otp.toString().trim()) {
+        return res.status(400).json({ error: 'Incorrect verification code. Please ask the student for the 6-digit code sent to their email.' });
+      }
+
+      // Mark verified
+      await pool.query('UPDATE email_verifications SET verified = TRUE WHERE id = $1', [otpRes.rows[0].id]);
     }
 
     const linkId = `link_${parentId}_${student.id}`;
@@ -1167,6 +1219,16 @@ app.post('/api/notifications/settings', async (req, res) => {
     res.status(500).json({ error: 'Failed to save settings' });
   }
 });
+
+// Serve frontend in production
+const distPath = path.join(__dirname, 'dist');
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+}
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Broke OS Backend running at http://0.0.0.0:${PORT}`);

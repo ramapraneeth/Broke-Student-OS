@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useFinance } from '../../context/FinanceContext';
 import { DonutChart } from '../common/DonutChart';
 import { CATEGORY_DETAILS, ExpenseCategory, Expense, LinkedChild } from '../../types';
@@ -24,9 +24,12 @@ import {
   FileText,
   X,
   Plus,
-  ArrowUpRight
+  ArrowUpRight,
+  Send,
+  GraduationCap
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { EmailVerificationModal } from '../common/EmailVerificationModal';
 
 export const AdminScreen: React.FC = () => {
   const { 
@@ -36,6 +39,8 @@ export const AdminScreen: React.FC = () => {
     setSelectedChild, 
     linkChild, 
     unlinkChild, 
+    searchStudents,
+    sendEmailOtp,
     childBudget, 
     childExpenses, 
     childMetrics, 
@@ -45,18 +50,51 @@ export const AdminScreen: React.FC = () => {
   const navigate = useNavigate();
 
   const [inputEmail, setInputEmail] = useState('');
+  const [studentSearchQuery, setStudentSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Array<{ id: string; name: string; email: string; isSetupComplete: boolean }>>([]);
+  const [isSearching, setIsSearching] = useState(false);
   const [isLinking, setIsLinking] = useState(false);
   const [linkMsg, setLinkMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showAddChildModal, setShowAddChildModal] = useState(false);
+
+  // Student OTP Verification state
+  const [targetStudentToLink, setTargetStudentToLink] = useState<{ id?: string; name: string; email: string } | null>(null);
+  const [showLinkOtpModal, setShowLinkOtpModal] = useState(false);
 
   // Expense History Filters & Search for Selected Child
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('All');
   const [selectedExpenseDetail, setSelectedExpenseDetail] = useState<Expense | null>(null);
 
-  const handleLinkSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanEmail = inputEmail.trim().toLowerCase();
+  // Search students live on modal query change
+  useEffect(() => {
+    if (!showAddChildModal) {
+      setStudentSearchQuery('');
+      setSearchResults([]);
+      setLinkMsg(null);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      if (studentSearchQuery.trim().length > 0) {
+        setIsSearching(true);
+        const results = await searchStudents(studentSearchQuery.trim());
+        setSearchResults(results);
+        setIsSearching(false);
+      } else {
+        // Fetch default suggestions
+        setIsSearching(true);
+        const results = await searchStudents('a');
+        setSearchResults(results);
+        setIsSearching(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [studentSearchQuery, showAddChildModal]);
+
+  const handleInitiateLinking = async (targetEmail: string, studentName = 'Student') => {
+    const cleanEmail = targetEmail.trim().toLowerCase();
     if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
       setLinkMsg({ type: 'error', text: 'Please enter a valid student email address.' });
       return;
@@ -64,19 +102,40 @@ export const AdminScreen: React.FC = () => {
 
     setIsLinking(true);
     setLinkMsg(null);
-    const result = await linkChild(cleanEmail);
+
+    // Send 1-minute consent OTP to student's email address
+    const otpRes = await sendEmailOtp(cleanEmail, 'link_child', 'student');
     setIsLinking(false);
 
-    if (result.success) {
-      setLinkMsg({ type: 'success', text: `Successfully linked ${result.student?.name || 'student'}!` });
-      setInputEmail('');
-      setTimeout(() => {
-        setShowAddChildModal(false);
-        setLinkMsg(null);
-      }, 1500);
+    if (otpRes.success) {
+      setTargetStudentToLink({ name: studentName, email: cleanEmail });
+      setShowAddChildModal(false);
+      setShowLinkOtpModal(true);
     } else {
-      setLinkMsg({ type: 'error', text: result.error || 'Failed to link student account.' });
+      setLinkMsg({ type: 'error', text: otpRes.error || 'Failed to dispatch verification code to student.' });
     }
+  };
+
+  const handleVerifyOtpAndCompleteLink = async (otpCode: string): Promise<{ success: boolean; error?: string }> => {
+    if (!targetStudentToLink?.email) {
+      return { success: false, error: 'No student selected for linking.' };
+    }
+
+    const linkRes = await linkChild(targetStudentToLink.email, otpCode);
+    if (linkRes.success) {
+      setShowLinkOtpModal(false);
+      setTargetStudentToLink(null);
+      return { success: true };
+    } else {
+      return { success: false, error: linkRes.error || 'Invalid or expired verification code.' };
+    }
+  };
+
+  const handleResendLinkOtp = async () => {
+    if (!targetStudentToLink?.email) {
+      return { success: false, error: 'No student selected.' };
+    }
+    return await sendEmailOtp(targetStudentToLink.email, 'link_child', 'student');
   };
 
   const handleLogout = () => {
@@ -788,107 +847,282 @@ export const AdminScreen: React.FC = () => {
       </div>
 
       {/* Link Child Modal */}
+      {/* Link Student Account Modal (Search & Find Child with Email + 1-Min OTP) */}
       {showAddChildModal && (
         <div
           style={{
             position: 'fixed',
             inset: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.6)',
-            backdropFilter: 'blur(4px)',
+            backgroundColor: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(6px)',
             zIndex: 100,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             padding: '16px',
+            animation: 'fadeIn 0.2s ease-out',
           }}
           onClick={() => setShowAddChildModal(false)}
         >
           <div
             style={{
               background: '#FFFFFF',
-              borderRadius: '20px',
+              borderRadius: '24px',
               width: '100%',
-              maxWidth: '420px',
+              maxWidth: '460px',
               padding: '24px',
-              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              maxHeight: '90vh',
+              display: 'flex',
+              flexDirection: 'column',
+              border: '1px solid #E2E8F0',
             }}
             onClick={e => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <UserPlus size={20} color="#2563EB" />
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#0F172A', margin: 0 }}>
-                  Link Student Account
-                </h3>
+            {/* Modal Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '12px',
+                    background: '#EFF6FF',
+                    color: '#2563EB',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <UserPlus size={20} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0F172A', margin: 0 }}>
+                    Link Student Account
+                  </h3>
+                  <span style={{ fontSize: '0.75rem', color: '#64748B' }}>
+                    Search and verify child account
+                  </span>
+                </div>
               </div>
               <button
                 onClick={() => setShowAddChildModal(false)}
-                style={{ background: '#F1F5F9', border: 'none', borderRadius: '50%', width: '30px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                style={{ background: '#F1F5F9', border: 'none', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
               >
                 <X size={16} color="#64748B" />
               </button>
             </div>
 
-            <p style={{ fontSize: '0.82rem', color: '#64748B', marginBottom: '16px' }}>
-              Enter your student's registered college/personal email address to link and monitor their allowance and spending in real-time.
+            <p style={{ fontSize: '0.82rem', color: '#64748B', margin: '0 0 16px 0', lineHeight: 1.4 }}>
+              Search for your student's account by name or email. Once selected, a <strong>1-minute security code</strong> will be sent to their email for linking consent.
             </p>
 
-            <form onSubmit={handleLinkSubmit}>
-              <div className="form-group">
-                <label className="form-label" htmlFor="link-child-email">Student Email Address</label>
-                <div style={{ position: 'relative' }}>
-                  <Mail size={16} color="#94A3B8" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
-                  <input
-                    id="link-child-email"
-                    type="email"
-                    className="input-field"
-                    style={{ paddingLeft: '38px' }}
-                    placeholder="student@university.edu"
-                    value={inputEmail}
-                    onChange={e => setInputEmail(e.target.value)}
-                    required
-                  />
-                </div>
+            {/* Live Search Input */}
+            <div className="form-group" style={{ marginBottom: '14px' }}>
+              <label className="form-label" style={{ fontSize: '0.8rem', fontWeight: 700 }}>
+                Search Student Accounts
+              </label>
+              <div style={{ position: 'relative' }}>
+                <Search size={16} color="#94A3B8" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
+                <input
+                  type="text"
+                  className="input-field"
+                  style={{ paddingLeft: '38px' }}
+                  placeholder="Type name or email (e.g. chiya, ram@gmail.com)"
+                  value={studentSearchQuery}
+                  onChange={e => setStudentSearchQuery(e.target.value)}
+                  autoFocus
+                />
               </div>
+            </div>
 
-              {linkMsg && (
-                <div
-                  style={{
-                    padding: '10px 12px',
-                    borderRadius: '8px',
-                    fontSize: '0.8rem',
-                    fontWeight: 600,
-                    marginBottom: '14px',
-                    background: linkMsg.type === 'success' ? '#ECFDF5' : '#FEF2F2',
-                    color: linkMsg.type === 'success' ? '#065F46' : '#991B1B',
-                    border: `1px solid ${linkMsg.type === 'success' ? '#A7F3D0' : '#FECACA'}`,
-                  }}
-                >
-                  {linkMsg.type === 'success' ? '✓ ' : '⚠️ '}
-                  {linkMsg.text}
+            {/* Search Results List */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                minHeight: '140px',
+                maxHeight: '220px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                marginBottom: '16px',
+                paddingRight: '4px',
+              }}
+            >
+              {isSearching ? (
+                <div style={{ textAlign: 'center', padding: '24px', color: '#64748B', fontSize: '0.85rem' }}>
+                  <span>Searching student accounts...</span>
+                </div>
+              ) : searchResults.length > 0 ? (
+                searchResults.map(student => {
+                  const isAlreadyLinked = linkedChildren.some(c => c.email.toLowerCase() === student.email.toLowerCase());
+
+                  return (
+                    <div
+                      key={student.id}
+                      style={{
+                        padding: '12px 14px',
+                        borderRadius: '14px',
+                        border: '1.5px solid #E2E8F0',
+                        background: isAlreadyLinked ? '#F8FAFC' : '#FFFFFF',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '10px',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                        <div
+                          style={{
+                            width: '36px',
+                            height: '36px',
+                            borderRadius: '10px',
+                            background: '#EEF2FF',
+                            color: '#4F46E5',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: 800,
+                            fontSize: '0.9rem',
+                            flexShrink: 0,
+                          }}
+                        >
+                          {student.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {student.name}
+                          </div>
+                          <div style={{ fontSize: '0.74rem', color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {student.email}
+                          </div>
+                        </div>
+                      </div>
+
+                      {isAlreadyLinked ? (
+                        <span
+                          style={{
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            color: '#059669',
+                            background: '#ECFDF5',
+                            padding: '4px 8px',
+                            borderRadius: '8px',
+                            flexShrink: 0,
+                          }}
+                        >
+                          ✓ Linked
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={isLinking}
+                          onClick={() => handleInitiateLinking(student.email, student.name)}
+                          style={{
+                            background: '#2563EB',
+                            color: '#FFFFFF',
+                            border: 'none',
+                            borderRadius: '10px',
+                            padding: '6px 12px',
+                            fontSize: '0.78rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            flexShrink: 0,
+                          }}
+                        >
+                          <Send size={12} />
+                          <span>Select & Send Code</span>
+                        </button>
+                      )}
+                    </div>
+                  );
+                })
+              ) : (
+                <div style={{ textAlign: 'center', padding: '24px 12px', color: '#94A3B8', fontSize: '0.82rem' }}>
+                  No student accounts found matching "{studentSearchQuery}".
                 </div>
               )}
+            </div>
 
-              <button
-                type="submit"
-                disabled={isLinking}
+            {/* Direct Email Fallback */}
+            <div style={{ borderTop: '1px solid #F1F5F9', paddingTop: '14px' }}>
+              <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748B', marginBottom: '6px' }}>
+                Or enter student email directly:
+              </div>
+              <form
+                onSubmit={e => {
+                  e.preventDefault();
+                  if (inputEmail) handleInitiateLinking(inputEmail);
+                }}
+                style={{ display: 'flex', gap: '8px' }}
+              >
+                <input
+                  type="email"
+                  className="input-field"
+                  style={{ flex: 1, height: '40px', fontSize: '0.85rem' }}
+                  placeholder="student@gmail.com"
+                  value={inputEmail}
+                  onChange={e => setInputEmail(e.target.value)}
+                />
+                <button
+                  type="submit"
+                  disabled={isLinking || !inputEmail}
+                  style={{
+                    background: '#0F172A',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    borderRadius: '10px',
+                    padding: '0 14px',
+                    fontSize: '0.8rem',
+                    fontWeight: 700,
+                    cursor: isLinking || !inputEmail ? 'not-allowed' : 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {isLinking ? 'Sending...' : 'Send Code'}
+                </button>
+              </form>
+            </div>
+
+            {linkMsg && (
+              <div
                 style={{
-                  width: '100%',
-                  height: '46px',
-                  borderRadius: '12px',
-                  background: 'linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)',
-                  color: '#FFFFFF',
-                  border: 'none',
-                  fontSize: '0.9rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
+                  marginTop: '12px',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  fontSize: '0.78rem',
+                  fontWeight: 600,
+                  background: linkMsg.type === 'success' ? '#ECFDF5' : '#FEF2F2',
+                  color: linkMsg.type === 'success' ? '#065F46' : '#991B1B',
+                  border: `1px solid ${linkMsg.type === 'success' ? '#A7F3D0' : '#FECACA'}`,
                 }}
               >
-                {isLinking ? 'Linking Student...' : '+ Confirm & Link Account'}
-              </button>
-            </form>
+                {linkMsg.type === 'success' ? '✓ ' : '⚠️ '}
+                {linkMsg.text}
+              </div>
+            )}
           </div>
         </div>
+      )}
+
+      {/* 1-Minute Expiring OTP Verification Modal for Parent Entering Child's Consent Code */}
+      {targetStudentToLink && (
+        <EmailVerificationModal
+          isOpen={showLinkOtpModal}
+          email={targetStudentToLink.email}
+          reason="link_child"
+          onClose={() => {
+            setShowLinkOtpModal(false);
+            setTargetStudentToLink(null);
+          }}
+          onVerify={handleVerifyOtpAndCompleteLink}
+          onResend={handleResendLinkOtp}
+        />
       )}
 
       {/* Transaction Detail Modal for Parent */}

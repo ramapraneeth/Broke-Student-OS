@@ -72,7 +72,8 @@ interface FinanceContextType {
   
   // Parent actions
   fetchLinkedChildren: () => Promise<void>;
-  linkChild: (childEmail: string) => Promise<{ success: boolean; student?: LinkedChild; error?: string }>;
+  searchStudents: (query: string) => Promise<Array<{ id: string; name: string; email: string; isSetupComplete: boolean }>>;
+  linkChild: (childEmail: string, otp?: string) => Promise<{ success: boolean; student?: LinkedChild; error?: string }>;
   unlinkChild: (childEmail: string) => Promise<void>;
 }
 
@@ -386,15 +387,28 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     localStorage.removeItem(STORAGE_AUTH_KEY);
   };
 
-  // Parent: Link a new student child by Email
-  const linkChild = async (childEmail: string): Promise<{ success: boolean; student?: LinkedChild; error?: string }> => {
+  // Parent: Search student accounts by email or name
+  const searchStudents = async (query: string): Promise<Array<{ id: string; name: string; email: string; isSetupComplete: boolean }>> => {
+    if (!query || !query.trim()) return [];
+    try {
+      const res = await fetch(`/api/parent/search-students?query=${encodeURIComponent(query.trim())}`);
+      const data = await res.json();
+      return data.students || [];
+    } catch (err) {
+      console.error('Failed to search students:', err);
+      return [];
+    }
+  };
+
+  // Parent: Link a new student child by Email (with OTP verification)
+  const linkChild = async (childEmail: string, otp?: string): Promise<{ success: boolean; student?: LinkedChild; error?: string }> => {
     if (!user?.id) return { success: false, error: 'Not logged in' };
     const cleanEmail = childEmail.trim().toLowerCase();
     try {
       const res = await fetch('/api/parent/link-child', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parentId: user.id, childEmail: cleanEmail }),
+        body: JSON.stringify({ parentId: user.id, childEmail: cleanEmail, otp }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -793,6 +807,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         deleteHostelExpense,
         refreshData,
         fetchLinkedChildren,
+        searchStudents,
         linkChild,
         unlinkChild,
       }}
