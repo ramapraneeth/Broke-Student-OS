@@ -15,7 +15,7 @@ const { Pool } = pg;
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-const connectionString = "postgresql://neondb_owner:npg_ZtbPUjeFT39r@ep-damp-wildflower-azwjta3a-pooler.c-3.ap-southeast-1.aws.neon.tech/neondb?sslmode=require";
+const connectionString = process.env.DATABASE_URL || "postgresql://neondb_owner:npg_ZtbPUjeFT39r@ep-damp-wildflower-azwjta3a-pooler.c-3.ap-southeast-1.aws.neon.tech/neondb?sslmode=require";
 
 const pool = new Pool({
   connectionString,
@@ -28,12 +28,16 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// === NODEMAILER EMAIL TRANSPORTER (WARM CONNECTION POOL) ===
+// === NODEMAILER EMAIL TRANSPORTER (WARM CONNECTION POOL + IPv4 FOR CLOUD) ===
 const GMAIL_USER = process.env.GMAIL_USER || 'infodesk.college@gmail.com';
 const GMAIL_APP_PASSWORD = (process.env.GMAIL_APP_PASSWORD || 'dtlz boee luyv kgpk').replace(/\s+/g, '');
 
 const mailTransporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false, // Standard STARTTLS
+  requireTLS: true,
+  family: 4, // CRITICAL: Force IPv4 connection to prevent ENETUNREACH on Render/AWS/Cloud
   pool: true, // Reuse open socket connections for ultra-fast dispatch (<100ms)
   maxConnections: 5,
   maxMessages: 100,
@@ -41,6 +45,9 @@ const mailTransporter = nodemailer.createTransport({
   auth: {
     user: GMAIL_USER,
     pass: GMAIL_APP_PASSWORD,
+  },
+  tls: {
+    rejectUnauthorized: false,
   },
 });
 
