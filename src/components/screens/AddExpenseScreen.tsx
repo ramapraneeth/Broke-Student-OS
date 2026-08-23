@@ -210,7 +210,7 @@ export const AddExpenseScreen: React.FC = () => {
                   Smart Screenshot Scanner
                 </h3>
                 <span style={{ fontSize: '0.72rem', color: '#64748B' }}>
-                  Powered by Gemini 3.6 Flash AI
+                  Powered by Gemini Flash AI
                 </span>
               </div>
             </div>

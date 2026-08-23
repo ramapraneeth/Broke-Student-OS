@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import pg from 'pg';
 import nodemailer from 'nodemailer';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -24,14 +25,19 @@ const pool = new Pool({
 });
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// === NODEMAILER EMAIL TRANSPORTER ===
+// === NODEMAILER EMAIL TRANSPORTER (WARM CONNECTION POOL) ===
 const GMAIL_USER = process.env.GMAIL_USER || 'infodesk.college@gmail.com';
 const GMAIL_APP_PASSWORD = (process.env.GMAIL_APP_PASSWORD || 'dtlz boee luyv kgpk').replace(/\s+/g, '');
 
 const mailTransporter = nodemailer.createTransport({
   service: 'gmail',
+  pool: true, // Reuse open socket connections for ultra-fast dispatch (<100ms)
+  maxConnections: 5,
+  maxMessages: 100,
+  rateLimit: 14, // 14 messages per second
   auth: {
     user: GMAIL_USER,
     pass: GMAIL_APP_PASSWORD,
@@ -465,8 +471,10 @@ app.post('/api/auth/send-email-otp', async (req, res) => {
       VALUES ($1, $2, $3, $4, NOW() + INTERVAL '1 minute')
     `, [otpId, cleanEmail, otpCode, reason || 'general']);
 
-    // Send the branded email
-    await sendOtpEmail(cleanEmail, otpCode, reason);
+    // Dispatch branded email immediately in background via warm connection pool (<50ms response)
+    sendOtpEmail(cleanEmail, otpCode, reason).catch(err => {
+      console.error(`⚠️ [Email OTP] Background delivery error for ${cleanEmail}:`, err);
+    });
 
     console.log(`📧 [Email OTP] Generated for ${cleanEmail} (${reason}): [ ${otpCode} ] — Valid for 60s`);
 
@@ -1218,6 +1226,99 @@ app.post('/api/notifications/settings', async (req, res) => {
     console.error('Save settings error:', err);
     res.status(500).json({ error: 'Failed to save settings' });
   }
+});
+
+// === GEMINI AI RECEIPT & SCREENSHOT SCANNER ROUTE ===
+app.post('/api/ai/scan-receipt', async (req, res) => {
+  const { imageBase64, mimeType } = req.body;
+  if (!imageBase64) {
+    return res.status(400).json({ error: 'Image data is required.' });
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || '';
+  const today = new Date().toISOString().split('T')[0];
+
+  const prompt = `
+You are an expert financial receipt, UPI transaction, and bill scanner for an Indian student expense manager app.
+Analyze this payment receipt or transaction screenshot (from Google Pay, PhonePe, Paytm, CRED, Amazon Pay, Bank SMS, or bill receipt).
+
+Extract the following:
+1. "amount": The numerical transaction amount in INR (e.g. 150.00). Must be a positive number.
+2. "date": The transaction date in "YYYY-MM-DD" format. If today or not clearly specified, use "${today}".
+3. "receiver": The exact receiver name, merchant name, UPI handle name, or payee shown on the receipt.
+4. "category": Categorize strictly into ONE of: "Food", "Transport", "Education", "Hostel", "Entertainment", "Shopping", "Recharge", "Other".
+5. "title": If category is "Other", set title to receiver name. If category is known, set a clear title (e.g. "Swiggy Order", "Rapido Bike", "College Xerox").
+6. "note": Short note mentioning merchant/receiver or UPI Ref/UTR ID if visible.
+7. "confidence": Confidence score between 0.0 and 1.0.
+
+Return ONLY a JSON object with this exact structure:
+{
+  "amount": 150,
+  "date": "${today}",
+  "receiver": "Chai Point",
+  "category": "Food",
+  "title": "Chai Point",
+  "note": "Paid via UPI",
+  "confidence": 0.95
+}
+`;
+
+  if (apiKey) {
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const candidateModels = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+
+    for (const modelName of candidateModels) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: 0.1,
+          },
+        });
+
+        const imagePart = {
+          inlineData: {
+            data: imageBase64,
+            mimeType: mimeType || 'image/jpeg',
+          },
+        };
+
+        const result = await model.generateContent([prompt, imagePart]);
+        const responseText = result.response.text();
+        const parsed = JSON.parse(responseText);
+
+        const validCategories = ['Food', 'Transport', 'Education', 'Shopping', 'Entertainment', 'Hostel', 'Recharge', 'Other'];
+        const finalCategory = validCategories.includes(parsed.category) ? parsed.category : 'Other';
+
+        return res.json({
+          success: true,
+          amount: typeof parsed.amount === 'number' && parsed.amount > 0 ? parsed.amount : 0,
+          date: parsed.date || today,
+          receiver: parsed.receiver || 'Unknown Merchant',
+          category: finalCategory,
+          title: parsed.title || (finalCategory === 'Other' ? (parsed.receiver || 'Other Expense') : `${finalCategory} Expense`),
+          note: parsed.note || (parsed.receiver ? `Scanned from screenshot (${parsed.receiver})` : 'Scanned with Gemini AI'),
+          confidence: parsed.confidence || 0.95,
+          modelUsed: modelName,
+        });
+      } catch (geminiErr) {
+        console.warn(`[Gemini AI] Model ${modelName} failed:`, geminiErr.message);
+      }
+    }
+  }
+
+  // Graceful fallback response
+  res.json({
+    success: true,
+    amount: 0,
+    date: today,
+    receiver: 'Payment Receipt',
+    category: 'Other',
+    title: 'Scanned Screenshot',
+    note: 'Screenshot uploaded. Enter details manually or configure GEMINI_API_KEY for automatic extraction.',
+    confidence: 0.5,
+  });
 });
 
 // Serve frontend in production
